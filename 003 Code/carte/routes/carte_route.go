@@ -7,5 +7,6 @@ import (
 )
 
 func CarteRoute(router *gin.Engine) {
-	router.POST("/createcontainer", controllers.CreateContainer())
+	router.GET("/createcontainer", controllers.CreateContainer)
+	//router.POST("/buildimage", controllers.BuildImage)
 }

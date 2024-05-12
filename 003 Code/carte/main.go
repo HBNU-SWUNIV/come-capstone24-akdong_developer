@@ -12,5 +12,5 @@ func main() {
 	// 라우트
 	routes.CarteRoute(router)
 
-	router.Run("")
+	router.Run(":8080")
 }

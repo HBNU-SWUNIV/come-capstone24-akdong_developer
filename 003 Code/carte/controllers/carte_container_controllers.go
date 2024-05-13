@@ -14,8 +14,15 @@ import (
 )
 
 func CreateContainer(c *gin.Context) {
-	// cgroups를 사용하여 메모리 제한 설정
-	cgroups()
+
+	// cgroups를 사용하여 리소스 제한 설정
+	memLimit := "100000000" // 예: 100MB
+	cpuLimit := "50"        // 예: 50% CPU
+
+	if err := setCgroups(memLimit, cpuLimit); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	// 각 네임스페이스 설정 함수 호출
     setupUTSNamespace()
@@ -38,20 +45,36 @@ func CreateContainer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Container created successfully"})
 }
 
-func cgroups() {
+func setCgroups(memLimit, cpuLimit string) error {
 	// cgroups 경로
 	cgroup := "/sys/fs/cgroup/"
 	pid := os.Getpid()
-	memLimit := "100000000" // 예: 100MB
 
 	// 메모리 cgroup 설정
 	memCgroupPath := filepath.Join(cgroup, "memory", "mycontainer")
-	os.Mkdir(memCgroupPath, 0755)
-	os.WriteFile(filepath.Join(memCgroupPath, "memory.limit_in_bytes"), []byte(memLimit), 0644)
-	os.WriteFile(filepath.Join(memCgroupPath, "cgroup.procs"), []byte(strconv.Itoa(pid)), 0644)
+	if err := os.Mkdir(memCgroupPath, 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(memCgroupPath, "memory.limit_in_bytes"), []byte(memLimit), 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(memCgroupPath, "cgroup.procs"), []byte(strconv.Itoa(pid)), 0644); err != nil {
+		return err
+	}
 
-	// 여기에 컨테이너 실행 로직 추가
-	fmt.Println("Container with limited memory running...")
+	// CPU cgroup 설정
+	cpuCgroupPath := filepath.Join(cgroup, "cpu", "mycontainer")
+	if err := os.Mkdir(cpuCgroupPath, 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(cpuCgroupPath, "cpu.cfs_quota_us"), []byte(cpuLimit), 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(cpuCgroupPath, "cgroup.procs"), []byte(strconv.Itoa(pid)), 0644); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func setupUTSNamespace() {

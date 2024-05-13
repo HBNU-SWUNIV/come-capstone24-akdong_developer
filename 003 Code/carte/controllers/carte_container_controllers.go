@@ -31,6 +31,13 @@ func CreateContainer(c *gin.Context) {
     setupIPCNamespace()
     setupMountNamespace()
 
+	
+	// pivot root를 사용하여 파일 시스템 변경
+	if err := pivotRoot("/my_container/rootfs"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
 	// 컨테이너 내부에서 호스트 이름, PID, IP 주소, IPC 등을 확인하기 위해 명령어 실행
     cmd := exec.Command("/bin/sh", "-c", "hostname; ps aux; ip a; ipcs")
     cmd.Stdin = os.Stdin
@@ -110,7 +117,22 @@ func setupMountNamespace() {
     cmd.Run()
 }
 
-
+func pivotRoot(rootfs string) error {
+	// pivot_root를 사용하여 루트 파일 시스템 변경
+	if err := syscall.Mount(rootfs, rootfs, "bind", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+		return fmt.Errorf("failed to mount rootfs: %w", err)
+	}
+	if err := syscall.PivotRoot(rootfs, filepath.Join(rootfs, "old_root")); err != nil {
+		return fmt.Errorf("failed to pivot root: %w", err)
+	}
+	if err := os.Chdir("/"); err != nil {
+		return fmt.Errorf("failed to change directory: %w", err)
+	}
+	if err := syscall.Unmount("/old_root", syscall.MNT_DETACH); err != nil {
+		return fmt.Errorf("failed to unmount old root: %w", err)
+	}
+	return nil
+}
 
 
 

@@ -14,7 +14,7 @@ func GetConnector() *sql.DB {
 		User:                 os.Getenv("DBUSER"),
 		Passwd:               os.Getenv("DBPASS"),
 		Net:                  "tcp",
-		Addr:                 "localhost:3306",
+		Addr:                 "mysql:3306",
 		Collation:            "utf8mb4_general_ci",
 		Loc:                  time.UTC,
 		MaxAllowedPacket:     4 << 20.,
@@ -35,7 +35,7 @@ func GetConnector() *sql.DB {
 	}
 
 	// Database 없는 경우
-	_, err = db.Exec("CREATE DATABASES IF NOT EXISTS go_signup")
+	_, err = db.Exec("CREATE DATABASE IF NOT EXISTS go_signup")
 	if err != nil {
 		fmt.Println("Could not create databases:", err)
 	}
@@ -52,7 +52,7 @@ func GetConnector() *sql.DB {
 
 func createTable(db *sql.DB) error {
 	_, err := db.Exec(`
-		CREATE TABLE IF EXISTS users (
+		CREATE TABLE IF NOT EXISTS users (
 			ID int NOT NULL AUTO_INCREMENT PRIMARY KEY,
 			user_id varchar(30) UNIQUE,
 			user_pw varchar(1000),

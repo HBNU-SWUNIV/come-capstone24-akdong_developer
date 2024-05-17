@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0.36
+    container_name: mysql
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: 12345678
+      MYSQL_DATABASE: go_signup
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: login:latest
+    container_name: app
+    depends_on:
+      - mysql
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - DBUSER=root
+      - DBPASS=12345678
+      - DBNAME=go_signup
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./login_http_go:/server_login
+
+volumes:
+  mysql-data:

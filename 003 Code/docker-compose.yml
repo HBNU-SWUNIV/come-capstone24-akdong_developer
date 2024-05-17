@@ -17,7 +17,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: login:latest
-    container_name: app
+    container_name: login
     depends_on:
       - mysql
     environment:

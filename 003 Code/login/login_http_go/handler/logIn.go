@@ -2,7 +2,6 @@ package handler
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 
@@ -40,7 +39,7 @@ func LogIn(c echo.Context) error {
 
 	// db 연결
 	db := db.GetConnector()
-	fmt.Println("Connected DB")
+	log.Println("Connected DB")
 
 	var recv_userID string
 	var recv_userPW string
@@ -48,15 +47,14 @@ func LogIn(c echo.Context) error {
 	// 가입여부 확인
 	err := db.QueryRow("SELECT user_id, user_pw FROM users WHERE user_id = ?", user.User_id).Scan(&recv_userID, &recv_userPW)
 	if err == sql.ErrNoRows {
-		log.Println(err)
+		log.Println("userID :", recv_userID, " usererr :", err)
 		return c.JSON(http.StatusOK, e_2)
 	}
-	log.Println() // 로그 출력()
 
 	// 비밀번호 검증
 	res := hashing.CheckHashPassword(recv_userPW, user.User_pw)
 	if !res {
-		log.Println(err)
+		log.Println("passworderr :", err)
 		return c.JSON(http.StatusOK, e_3)
 	}
 
@@ -67,7 +65,7 @@ func LogIn(c echo.Context) error {
 	// 로그인 성공후 반환
 	err = db.QueryRow("SELECT nickname, email FROM users WHERE user_id = ?", recv_userID).Scan(&send_Nickname, &send_Email)
 	if err != nil {
-		log.Println(err)
+		log.Println("returnerr :", err)
 		return err
 	}
 
@@ -80,5 +78,6 @@ func LogIn(c echo.Context) error {
 		},
 	}
 
+	log.Println("success login :", recv_userID) // 로그 출력
 	return c.JSON(http.StatusOK, c_1)
 }

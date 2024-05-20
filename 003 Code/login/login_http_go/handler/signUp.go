@@ -36,7 +36,7 @@ func SignUp(c echo.Context) error {
 	if err != sql.ErrNoRows {
 		log.Println(err)
 		return c.JSON(http.StatusBadRequest, &models.Code{
-			Code : 0, Message: "existing id",
+			Code: 0, Message: "existing id",
 		})
 	}
 
@@ -63,7 +63,6 @@ func SignUp(c echo.Context) error {
 		Code: 1, Message: "Sign up Success",
 	})
 }
-
 
 // // 닉네임 존재 여부 확인 --> 존재 하는 걸로 변경
 // query_nick := fmt.Sprintf("SELECT * FROM users WHERE nickname ='%s';", user.Nickname)

@@ -51,6 +51,7 @@ func LogIn(c echo.Context) error {
 		log.Println(err)
 		return c.JSON(http.StatusOK, e_2)
 	}
+	log.Println() // 로그 출력()
 
 	// 비밀번호 검증
 	res := hashing.CheckHashPassword(recv_userPW, user.User_pw)

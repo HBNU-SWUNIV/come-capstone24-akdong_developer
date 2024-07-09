@@ -4,8 +4,8 @@ import (
     "log"
     "net/http"
 
-    "Carte/Carte_Daemon/controller"
-    "Carte/Carte_Daemon/middleware"
+    "Carte_Daemon/controller"
+    "Carte_Daemon/middleware"
 )
 
 func main() {

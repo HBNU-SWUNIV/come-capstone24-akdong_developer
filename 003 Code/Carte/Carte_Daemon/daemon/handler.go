@@ -3,9 +3,8 @@ package daemon
 import (
     "encoding/json"
     "net/http"
-    "os"
-    "os/exec"
     "syscall"
+    "os/exec"
 )
 
 type RunRequest struct {
@@ -13,6 +12,7 @@ type RunRequest struct {
     Command string `json:"command"`
 }
 
+// RunContainer handles the /run endpoint request
 func RunContainer(w http.ResponseWriter, r *http.Request) {
     var req RunRequest
     if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -38,3 +38,4 @@ func RunContainer(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusOK)
     json.NewEncoder(w).Encode(map[string]string{"status": "started"})
 }
+

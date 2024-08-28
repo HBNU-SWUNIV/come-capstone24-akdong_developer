@@ -28,12 +28,31 @@ func CtCreate(imageName string, containerName string) {
 
 	// 이미지 경로 확인
 	imagePath := "/CarteTest/image/" + imageName
-	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-		log.Fatal("Image not found: %s", imagePath)
+	imageTarPath := imagePath + ".tar"
+	containerPath := "/CarteTest/container/" + containerName
+
+	// 이미지가 tar 파일인지 확인하고 해제
+	if _, err := os.Stat(imageTarPath); err == nil{
+		fmt.Println("Found tar file...")
+
+		// /CarteTest/image/testimage 폴더가 없으면 생성
+		if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+			if err := os.MkdirAll(imagePath, 0755); err != nil {
+				log.Fatalf("Failed to create image directory: %v", err)
+			}
+		}
+
+		err := extractTar(imageTarPath, imagePath)
+		if err != nil{
+			log.Fatalf("Failed to extract tar file: %v", err)
+		}
+	} else if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		log.Fatalf("Image directory not found: %s", imagePath)
+	} else if err != nil{
+		log.Fatalf("Failed to check image directory: %v", err)
 	}
 
 	// 컨테이너 경로 확인
-	containerPath := "/CarteTest/container/" + containerName
 	if err := os.Mkdir(containerPath, 0755); err != nil {
 		log.Fatalf("Failed to create container directory: %v", err)
 	}
@@ -41,15 +60,7 @@ func CtCreate(imageName string, containerName string) {
 	// 이미지 압축인경우 해제 필요
 	// 이미지가 tar인 경우(추가 필요)
 
-	// 이미지가 tar 파일인지 확인하고 해제
-	if filepath.Ext(imagePath) == ".tar" {
-		err := extractTar(imagePath, containerPath)
-		if err != nil{
-			log.Fatalf("Failed to extract tar file: %v", err)
-		}
-	} else {
-		log.Fatal("Unsupported image format")
-	}
+	
 
 	// 루트 파일 시스템 설정 (Chroot)
 	if err := syscall.Chroot(imagePath); err != nil {

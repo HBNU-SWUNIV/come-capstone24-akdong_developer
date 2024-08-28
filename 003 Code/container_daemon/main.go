@@ -35,40 +35,40 @@ func CtCreate(imageName string, containerName string) {
 	if _, err := os.Stat(imageTarPath); err == nil{
 		fmt.Println("Found tar file...")
 
-		// /CarteTest/image/testimage 폴더가 없으면 생성
-		if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-			if err := os.MkdirAll(imagePath, 0755); err != nil {
+		// /CarteTest/image/testcontainer 폴더가 없으면 생성
+		if _, err := os.Stat(containerPath); os.IsNotExist(err) {
+			if err := os.MkdirAll(containerPath, 0755); err != nil {
 				log.Fatalf("Failed to create image directory: %v", err)
 			}
 		}
 
-		err := extractTar(imageTarPath, imagePath)
+		err := extractTar(imageTarPath, containerPath)
 		if err != nil{
 			log.Fatalf("Failed to extract tar file: %v", err)
 		}
-	} else if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-		log.Fatalf("Image directory not found: %s", imagePath)
+	} else if _, err := os.Stat(containerPath); os.IsNotExist(err) {
+		log.Fatalf("Image directory not found: %s", containerPath)
 	} else if err != nil{
 		log.Fatalf("Failed to check image directory: %v", err)
 	}
 
-	// 컨테이너 경로 확인
-	if err := os.Mkdir(containerPath, 0755); err != nil {
-		log.Fatalf("Failed to create container directory: %v", err)
-	}
+	// // 컨테이너 경로 확인
+	// if err := os.Mkdir(containerPath, 0755); err != nil {
+	// 	log.Fatalf("Failed to create container directory: %v", err)
+	// }
 
 	// 이미지 압축인경우 해제 필요
 	// 이미지가 tar인 경우(추가 필요)
 
-	
-
 	// 루트 파일 시스템 설정 (Chroot)
-	if err := syscall.Chroot(imagePath); err != nil {
+	if err := syscall.Chroot(containerPath); err != nil {
 		log.Fatalf("Failed to chroot: %v", err)
 	}
 	if err := os.Chdir("/"); err != nil {
 		log.Fatalf("Failed to change directory: %v", err)
 	}
+
+	// --- fork/exec /bin/sh:no such file or directory 오류 --- 컨테이너 폴더 안에 /bin/sh없음. 기존 이미지 검토 필요
 
 	// 네임스페이스 격리 및 새로운 프로세스 실행
 	cmd := exec.Command("/bin/sh") // 기본 쉘을 실행하도록 설정

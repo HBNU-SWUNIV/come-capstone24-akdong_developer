@@ -71,7 +71,16 @@ func CtCreate(imageName string, containerName string) {
 	// --- fork/exec /bin/sh:no such file or directory 오류 --- 컨테이너 폴더 안에 /bin/sh없음. 기존 이미지 검토 필요
 
 	// 네임스페이스 격리 및 새로운 프로세스 실행
-	cmd := exec.Command("/bin/sh") // 기본 쉘을 실행하도록 설정
+	var cmd *exec.Cmd
+	switch containerName {
+	case "testcontainer":
+		// hello-world 이미지에 맞는 명령어를 실행
+		cmd = exec.Command("/hello")
+	default:
+		// 기본적으로 /bin/sh를 실행
+		cmd = exec.Command("/bin/sh")
+	}
+
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET | syscall.CLONE_NEWIPC,
 	}
@@ -134,7 +143,7 @@ func extractTar(tarFile, destDir string) error {
 
 func main() {
 	// 테스트를 위해 "hello-world"라는 이미지를 "test-container" 이름으로 컨테이너 생성
-	CtCreate("testimage", "testcontainer")
+	CtCreate("nginx", "nginx_container")
 }
 
 // Carte_Daemon 실행(서버, 컨테이너 생성 구현), Carte_Client 실행(이미지 전달)

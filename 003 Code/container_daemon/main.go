@@ -9,6 +9,7 @@ import(
 	"os/exec"
 	"path/filepath"
 	"syscall"
+	"strconv"
 )
 
 /* 구현 된 것 
@@ -35,65 +36,114 @@ func CtCreate(imageName string, containerName string) {
 	if _, err := os.Stat(imageTarPath); err == nil{
 		fmt.Println("Found tar file...")
 
-		// /CarteTest/image/testcontainer 폴더가 없으면 생성
-		if _, err := os.Stat(containerPath); os.IsNotExist(err) {
-			if err := os.MkdirAll(containerPath, 0755); err != nil {
+		// /CarteTest/image/testimage __ tar인경우 폴더가 없으면 생성
+		if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+			if err := os.MkdirAll(imagePath, 0755); err != nil {
 				log.Fatalf("Failed to create image directory: %v", err)
 			}
 		}
 
-		err := extractTar(imageTarPath, containerPath)
+		err := extractTar(imageTarPath, imagePath)
 		if err != nil{
 			log.Fatalf("Failed to extract tar file: %v", err)
 		}
-	} else if _, err := os.Stat(containerPath); os.IsNotExist(err) {
-		log.Fatalf("Image directory not found: %s", containerPath)
+	} else if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		log.Fatalf("Image directory not found: %s", imagePath)
 	} else if err != nil{
 		log.Fatalf("Failed to check image directory: %v", err)
 	}
 
-	// // 컨테이너 경로 확인
-	// if err := os.Mkdir(containerPath, 0755); err != nil {
-	// 	log.Fatalf("Failed to create container directory: %v", err)
-	// }
-
-	// 이미지 압축인경우 해제 필요
-	// 이미지가 tar인 경우(추가 필요)
-
-	// 루트 파일 시스템 설정 (Chroot)
-	if err := syscall.Chroot(containerPath); err != nil {
-		log.Fatalf("Failed to chroot: %v", err)
-	}
-	if err := os.Chdir("/"); err != nil {
-		log.Fatalf("Failed to change directory: %v", err)
+	// 컨테이너 경로 확인
+	if _, err := os.Stat(containerPath); os.IsNotExist(err) {
+		if err := os.Mkdir(containerPath, 0755); err != nil && !os.IsExist(err) {
+			log.Fatalf("Failed to create container directory: %v", err)
+		}
+	} else {
+		fmt.Printf("Container %s already exists", containerName)
+		StartContainer(containerPath)
+		return
 	}
 
-	// --- fork/exec /bin/sh:no such file or directory 오류 --- 컨테이너 폴더 안에 /bin/sh없음. 기존 이미지 검토 필요
+	// ----- pivot_root
+	pivotRoot(imagePath, containerPath)
 
-	// 네임스페이스 격리 및 새로운 프로세스 실행
-	var cmd *exec.Cmd
-	switch containerName {
-	case "testcontainer":
-		// hello-world 이미지에 맞는 명령어를 실행
-		cmd = exec.Command("/hello")
-	default:
-		// 기본적으로 /bin/sh를 실행
-		cmd = exec.Command("/bin/sh")
+	// 마운트 네임 스페이스 격리 및 Cgroup 추가
+	if err := setupCgroups(); err != nil {
+		log.Fatalf("Failed to set up cgroups: %v", err)
 	}
 
+	// 컨테이너 내에서 프로세스 실행
+	cmd := exec.Command("/bin/sh")
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET | syscall.CLONE_NEWIPC,
 	}
-
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 
-	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to run the command: %v", err)
+	if err := cmd.Start(); err != nil {
+		log.Fatalf("Failed to start the command: %v", err)
 	}
 
-	fmt.Printf("Container %s created successfully!\n", containerName)
+	// 리소스 할당 및 관리
+	go func() {
+		cmd.Wait() // 프로세스가 종료될 때까지 대기
+		fmt.Println("Process has exited.")
+	}()
+
+	fmt.Printf("Container %s created and started successfully!\n", containerName)
+	select {} // 컨테이너를 계속 실행 상태로 유지
+	
+
+	// 이미지 압축인경우 해제 필요
+	// 이미지가 tar인 경우(추가 필요)
+
+	// 1. 루트 파일 시스템 구성 (Chroot)
+	// 2. 읽기-쓰기 계층 추가
+	// 3. 네임 스페이스 격리 및 Cgroup 추가
+	// 4. 프로세스 실행
+	// 5. 리소스 할당 및 관리
+	// 6. 컨테이너 실행 유지
+
+	// // 1. 루트 파일 시스템 구성 (Chroot) [pivot root 사용하기]
+	// // 컨테이너의 파일 시스템을 이미지로 설정합니다.
+	// if err := syscall.Chroot(imagePath); err != nil {
+	// 	log.Fatalf("Failed to chroot: %v", err)
+	// }
+	// if err := os.Chdir("/"); err != nil {
+	// 	log.Fatalf("Failed to change directory: %v", err)
+	// }
+
+	// // 3. 마운트 네임 스페이스 격리 및 Cgroup 추가
+	// cmd := exec.Command("/bin/sh")
+	// cmd.SysProcAttr = &syscall.SysProcAttr{
+	// 	Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET | syscall.CLONE_NEWIPC,
+	// }
+	// cmd.Stdout = os.Stdout
+	// cmd.Stderr = os.Stderr
+	// cmd.Stdin = os.Stdin
+
+	// // cgroups 설정을 위한 로직을 추가합니다.
+	// if err := setupCgroups(); err != nil {
+	// 	log.Fatalf("Failed to set up cgroups: %v", err)
+	// }
+
+	// // 4. 프로세스 실행
+	// if err := cmd.Start(); err != nil {
+	// 	log.Fatalf("Failed to start the command: %v", err)
+	// }
+
+	// // 5. 리소스 할당 및 관리
+	// // 컨테이너의 자원 사용을 모니터링하고 관리할 수 있습니다.
+	// go func() {
+	// 	cmd.Wait() // 프로세스가 종료될 때까지 대기
+	// 	fmt.Println("Process has exited.")
+	// }()
+
+	// // 6. 컨테이너 실행 유지
+	// fmt.Printf("Container %s created successfully!\n", containerName)
+	// select {} // 컨테이너를 계속 실행 상태로 유지합니다.
+
 }
 
 // 이미지 압축 해제 함수
@@ -140,10 +190,96 @@ func extractTar(tarFile, destDir string) error {
 	return nil
 }
 
+func pivotRoot(newRoot, containerPath string){
+	// pivot_root 작업을 위한 old_root 디렉토리 생성
+	putOld := filepath.Join(containerPath, ".pivot_root_old")
+	if err := os.MkdirAll(putOld, 0700); err != nil {
+		log.Fatalf("Failed to create old root directory: %v", err)
+	}
+
+	if err := syscall.Mount(newRoot, newRoot, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+		log.Fatalf("Failed to mount new root: %v", err)
+	}
+
+	if err := syscall.PivotRoot(newRoot, putOld); err != nil {
+		log.Fatalf("Failed to pivot root: %v", err)
+	}
+
+	// 새로운 루트로 이동
+	if err := os.Chdir("/"); err != nil {
+		log.Fatalf("Failed to change directory to new root: %v", err)
+	}
+
+	// 사용이 끝난 old_root 마운트 해제 및 삭제
+	putOld = "/.pivot_root_old"
+	if err := syscall.Unmount(putOld, syscall.MNT_DETACH); err != nil {
+		log.Fatalf("Failed to unmount old root: %v", err)
+	}
+	if err := os.RemoveAll(putOld); err != nil {
+		log.Fatalf("Failed to remove old root directory: %v", err)
+	}
+}
+
+func setupCgroups() error {
+	cgroups := "/sys/fs/cgroup/"
+	pid := os.Getpid()
+
+	// Memory limit
+	if err := os.MkdirAll(filepath.Join(cgroups, "memory", "carte"), 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(cgroups, "memory", "carte", "memory.limit_in_bytes"), []byte("104857600"), 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(cgroups, "memory", "carte", "cgroup.procs"), []byte(strconv.Itoa(pid)), 0700); err != nil {
+		return err
+	}
+
+	// CPU limit
+	if err := os.MkdirAll(filepath.Join(cgroups, "cpu", "carte"), 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(cgroups, "cpu", "carte", "cpu.cfs_quota_us"), []byte("50000"), 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(cgroups, "cpu", "carte", "cgroup.procs"), []byte(strconv.Itoa(pid)), 0700); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+
+func StartContainer(containerPath string) {
+	// 컨테이너에서 실행할 명령어
+	cmd := exec.Command("/bin/sh")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET | syscall.CLONE_NEWIPC,
+	}
+	cmd.Stdout = os.Stdout // ------> 어떤 의미?
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Start();
+	err != nil {
+		log.Fatalf("Failed to start the command in existing container: %v", err)
+	}
+
+	// 리소스 할당 및 관리
+	go func() {
+		cmd.Wait() // 프로세스 종료까지 대기
+		fmt.Println("Process in existing container has exited")
+	}()
+
+	fmt.Println("Container started succesfully")
+	select {}
+}
+
+
 
 func main() {
 	// 테스트를 위해 "hello-world"라는 이미지를 "test-container" 이름으로 컨테이너 생성
-	CtCreate("nginx", "nginx_container")
+	CtCreate("testimage", "testcontainer")
 }
 
 // Carte_Daemon 실행(서버, 컨테이너 생성 구현), Carte_Client 실행(이미지 전달)

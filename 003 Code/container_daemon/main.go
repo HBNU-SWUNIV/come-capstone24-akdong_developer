@@ -65,6 +65,14 @@ func CtCreate(imageName string, containerName string) {
 	}
 
 	// ----- pivot_root
+
+	// 루트 파일 시스템 구성 (Chroot) [pivot root 사용하기]
+	// 마운트 네임 스페이스 격리 및 Cgroup 추가
+	// cgroups 설정을 위한 로직을 추가합니다.
+	// 프로세스 실행
+	// 리소스 할당 및 관리
+	// 컨테이너 실행 유지
+
 	pivotRoot(imagePath, containerPath)
 
 	// 마운트 네임 스페이스 격리 및 Cgroup 추가
@@ -93,56 +101,6 @@ func CtCreate(imageName string, containerName string) {
 
 	fmt.Printf("Container %s created and started successfully!\n", containerName)
 	select {} // 컨테이너를 계속 실행 상태로 유지
-	
-
-	// 이미지 압축인경우 해제 필요
-	// 이미지가 tar인 경우(추가 필요)
-
-	// 1. 루트 파일 시스템 구성 (Chroot)
-	// 2. 읽기-쓰기 계층 추가
-	// 3. 네임 스페이스 격리 및 Cgroup 추가
-	// 4. 프로세스 실행
-	// 5. 리소스 할당 및 관리
-	// 6. 컨테이너 실행 유지
-
-	// // 1. 루트 파일 시스템 구성 (Chroot) [pivot root 사용하기]
-	// // 컨테이너의 파일 시스템을 이미지로 설정합니다.
-	// if err := syscall.Chroot(imagePath); err != nil {
-	// 	log.Fatalf("Failed to chroot: %v", err)
-	// }
-	// if err := os.Chdir("/"); err != nil {
-	// 	log.Fatalf("Failed to change directory: %v", err)
-	// }
-
-	// // 3. 마운트 네임 스페이스 격리 및 Cgroup 추가
-	// cmd := exec.Command("/bin/sh")
-	// cmd.SysProcAttr = &syscall.SysProcAttr{
-	// 	Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET | syscall.CLONE_NEWIPC,
-	// }
-	// cmd.Stdout = os.Stdout
-	// cmd.Stderr = os.Stderr
-	// cmd.Stdin = os.Stdin
-
-	// // cgroups 설정을 위한 로직을 추가합니다.
-	// if err := setupCgroups(); err != nil {
-	// 	log.Fatalf("Failed to set up cgroups: %v", err)
-	// }
-
-	// // 4. 프로세스 실행
-	// if err := cmd.Start(); err != nil {
-	// 	log.Fatalf("Failed to start the command: %v", err)
-	// }
-
-	// // 5. 리소스 할당 및 관리
-	// // 컨테이너의 자원 사용을 모니터링하고 관리할 수 있습니다.
-	// go func() {
-	// 	cmd.Wait() // 프로세스가 종료될 때까지 대기
-	// 	fmt.Println("Process has exited.")
-	// }()
-
-	// // 6. 컨테이너 실행 유지
-	// fmt.Printf("Container %s created successfully!\n", containerName)
-	// select {} // 컨테이너를 계속 실행 상태로 유지합니다.
 
 }
 

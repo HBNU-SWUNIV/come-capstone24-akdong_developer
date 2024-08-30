@@ -22,6 +22,10 @@ Carte CLI 생성 로직 존재(권한 설정, 이미지 생성을 위한 자동 
 2. 플러그인 없이 네트워크 구성하기(오픈소스 활용한 라인 분석 : 커스터마이징 하도록)
 */
 
+
+// 컨테이너 실행이 좀 이상함 수정필요!!
+
+
 // 기존 이미지로 container 생성하기
 func CtCreate(imageName string, containerName string) {
 
@@ -100,8 +104,6 @@ func CtCreate(imageName string, containerName string) {
 	}()
 
 	fmt.Printf("Container %s created and started successfully!\n", containerName)
-	select {} // 컨테이너를 계속 실행 상태로 유지
-
 }
 
 // 이미지 압축 해제 함수
@@ -150,8 +152,8 @@ func extractTar(tarFile, destDir string) error {
 
 func pivotRoot(newRoot, containerPath string){
 	// pivot_root 작업을 위한 old_root 디렉토리 생성
-	putOld := filepath.Join(containerPath, ".pivot_root_old")
-	if err := os.MkdirAll(putOld, 0700); err != nil {
+	oldRoot := filepath.Join(containerPath, ".pivot_root_old")
+	if err := os.MkdirAll(oldRoot, 0700); err != nil {
 		log.Fatalf("Failed to create old root directory: %v", err)
 	}
 
@@ -159,7 +161,7 @@ func pivotRoot(newRoot, containerPath string){
 		log.Fatalf("Failed to mount new root: %v", err)
 	}
 
-	if err := syscall.PivotRoot(newRoot, putOld); err != nil {
+	if err := syscall.PivotRoot(newRoot, oldRoot); err != nil {
 		log.Fatalf("Failed to pivot root: %v", err)
 	}
 
@@ -169,11 +171,10 @@ func pivotRoot(newRoot, containerPath string){
 	}
 
 	// 사용이 끝난 old_root 마운트 해제 및 삭제
-	putOld = "/.pivot_root_old"
-	if err := syscall.Unmount(putOld, syscall.MNT_DETACH); err != nil {
+	if err := syscall.Unmount(oldRoot, syscall.MNT_DETACH); err != nil {
 		log.Fatalf("Failed to unmount old root: %v", err)
 	}
-	if err := os.RemoveAll(putOld); err != nil {
+	if err := os.RemoveAll(oldRoot); err != nil {
 		log.Fatalf("Failed to remove old root directory: %v", err)
 	}
 }
@@ -234,10 +235,10 @@ func StartContainer(containerPath string) {
 }
 
 
-
 func main() {
 	// 테스트를 위해 "hello-world"라는 이미지를 "test-container" 이름으로 컨테이너 생성
-	CtCreate("testimage", "testcontainer")
+	CtCreate("nginx", "nginx-container")
+	// StartContainer("/CarteTest/container/testcontainer")
 }
 
 // Carte_Daemon 실행(서버, 컨테이너 생성 구현), Carte_Client 실행(이미지 전달)

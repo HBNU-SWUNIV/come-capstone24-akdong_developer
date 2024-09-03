@@ -101,50 +101,51 @@ func CtCreate(imageName string, containerName string) {
 
 // tar.gz 파일 압축 해제
 func extractTarGz(tarGzFile, destDir string) error {
-	file, err := os.Open(tarGzFile)
-	if err != nil {
-		return fmt.Errorf("failed to open tar.gz file: %v", err)
-	}
-	defer file.Close()
+    file, err := os.Open(tarGzFile)
+    if err != nil {
+        return fmt.Errorf("failed to open tar.gz file: %v", err)
+    }
+    defer file.Close()
 
-	gzipReader, err := gzip.NewReader(file)
-	if err != nil {
-		return fmt.Errorf("failed to create gzip reader: %v", err)
-	}
-	defer gzipReader.Close()
+    gzipReader, err := gzip.NewReader(file)
+    if err != nil {
+        return fmt.Errorf("failed to create gzip reader: %v", err)
+    }
+    defer gzipReader.Close()
 
-	tarReader := tar.NewReader(gzipReader)
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read tar file: %v", err)
-		}
+    tarReader := tar.NewReader(gzipReader)
+    for {
+        header, err := tarReader.Next()
+        if err == io.EOF {
+            break
+        }
+        if err != nil {
+            return fmt.Errorf("failed to read tar file: %v", err)
+        }
 
-		targetPath := filepath.Join(destDir, header.Name)
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil {
-				return fmt.Errorf("failed to create directory: %v", err)
-			}
-		case tar.TypeReg:
-			outFile, err := os.Create(targetPath)
-			if err != nil {
-				return fmt.Errorf("failed to create file: %v", err)
-			}
-			if _, err := io.Copy(outFile, tarReader); err != nil {
-				outFile.Close()
-				return fmt.Errorf("failed to write file: %v", err)
-			}
-			outFile.Close()
-		default:
-			log.Printf("Unknown type: %v in %s", header.Typeflag, header.Name)
-		}
-	}
-	return nil
+        targetPath := filepath.Join(destDir, header.Name)
+        switch header.Typeflag {
+        case tar.TypeDir:
+            if err := os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil {
+                return fmt.Errorf("failed to create directory: %v", err)
+            }
+        case tar.TypeReg:
+            outFile, err := os.Create(targetPath)
+            if err != nil {
+                return fmt.Errorf("failed to create file: %v", err)
+            }
+            if _, err := io.Copy(outFile, tarReader); err != nil {
+                outFile.Close()
+                return fmt.Errorf("failed to write file: %v", err)
+            }
+            outFile.Close()
+        default:
+            log.Printf("Unknown type: %v in %s", header.Typeflag, header.Name)
+        }
+    }
+    return nil
 }
+
 
 func pivotRoot(newRoot, containerPath string) {
 	oldRoot := filepath.Join(containerPath, ".pivot_root_old")

@@ -6,6 +6,15 @@
 - mount | grep /CarteTest/image/nginx
 - umount /CarteTest/image/nginx
 
+## tarball 이미지 생성
+- mkdir -p /tmp/nginx-image
+- cd /tmp/nginx-image
+- docker run --name nginx-temp -d nginx
+- docker export nginx-temp | gzip > nginx.tar.gz
+- docker stop nginx-temp
+- docker rm nginx-temp
+
+
 ## 이미지 -> 컨테이너
 1. 이미지 pull
 2. 컨테이너 파일 시스템 구성(레이어 병합, 루트 파일 시스템 생성)

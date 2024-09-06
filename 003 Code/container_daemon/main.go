@@ -35,6 +35,7 @@ func CtCreate(imageName string, containerName string) {
         log.Fatalf("Failed to check image directory: %v", err)
     }
 
+    // 이건 그냥 컨테이너 경로 확인 - 컨테이너 경로를 이렇게 설정해도 되는가?
     if _, err := os.Stat(containerPath); os.IsNotExist(err) {
         if err := os.Mkdir(containerPath, 0755); err != nil && !os.IsExist(err) {
             log.Fatalf("Failed to create container directory: %v", err)
@@ -45,7 +46,8 @@ func CtCreate(imageName string, containerName string) {
         return
     }
 
-    if err := pivotRoot(imagePath, containerPath); err != nil {
+    if err := pivotRoot(containerPath, imagePath); err != nil {
+    // if err := pivotRoot(imagePath, containerPath); err != nil {
         log.Fatalf("Failed to pivot root: %v", err)
     }
 
@@ -98,36 +100,42 @@ func extractTar(tarFile, destDir string) error {
 	return nil
 }
 
-// 루트 파일 시스템 변경
+// 루트 파일 시스템 변경 함수
 func pivotRoot(newRoot, oldRoot string) error {
-    // Ensure the new root and old root directories exist
-    if err := os.MkdirAll(newRoot, 0700); err != nil {
-        return fmt.Errorf("failed to create new root directory: %v", err)
+    // 새로운 루트 디렉토리와 기존 루트 디렉토리 생성
+
+
+    // Bind 마운트: 새로운 루트 디렉토리를 마운트
+    if err := mountBind(newRoot, newRoot); err != nil {
+        return fmt.Errorf("failed to bind mount new root: %v", err)
     }
 
     if err := os.MkdirAll(oldRoot, 0700); err != nil {
         return fmt.Errorf("failed to create old root directory: %v", err)
     }
 
-    // Bind mount the new root directory to /new-root
-    if err := mountBind(newRoot, "/new-root"); err != nil {
-        return fmt.Errorf("failed to bind mount new root: %v", err)
-    }
-
-    // Perform pivot_root
-    if err := syscall.PivotRoot("/new-root", oldRoot); err != nil {
+    // pivot_root 시스템 호출로 루트 파일 시스템 변경
+    if err := syscall.PivotRoot(newRoot, oldRoot); err != nil {
         return fmt.Errorf("failed to pivot root: %v", err)
     }
 
-    // Change the working directory to the new root
+    // 문제 : PivotRoot전에 newRoot생성을 하는 바람에 컨테이너 생성으로 넘어가서 실행이 안됐었음(무한 대기), 순서 변경으로 해결
+    // 생성 문제 아님 : failed to pivot root: invalid argument 문제
+    if err := os.MkdirAll(newRoot, 0700); err != nil {
+        return fmt.Errorf("failed to create new root directory: %v", err)
+    }
+
+    // 루트 변경 후 새로운 루트로 작업 디렉토리 이동
     if err := os.Chdir("/"); err != nil {
         return fmt.Errorf("failed to change directory to new root: %v", err)
     }
 
-    // Unmount the old root
+    // 기존 루트 파일 시스템을 언마운트
     if err := syscall.Unmount(oldRoot, syscall.MNT_DETACH); err != nil {
         return fmt.Errorf("failed to unmount old root: %v", err)
     }
+
+    // 기존 루트 디렉토리 삭제
     if err := os.RemoveAll(oldRoot); err != nil {
         return fmt.Errorf("failed to remove old root directory: %v", err)
     }
@@ -135,16 +143,14 @@ func pivotRoot(newRoot, oldRoot string) error {
     return nil
 }
 
-// mount 명령어 실행
+// Bind 마운트 함수
 func mountBind(target, mountPoint string) error {
-    cmd := exec.Command("mount", "--bind", target, mountPoint)
-    output, err := cmd.CombinedOutput()
-    if err != nil {
-        return fmt.Errorf("failed to execute mount command: %v, output: %s", err, output)
+    // 마운트 시스템 호출 사용
+    if err := syscall.Mount(target, mountPoint, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+        return fmt.Errorf("failed to bind mount: %v", err)
     }
     return nil
 }
-
 
 // cgroups 설정
 func setupCgroups() error {

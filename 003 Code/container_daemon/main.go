@@ -14,48 +14,34 @@ import (
 
 // 컨테이너 생성
 func CtCreate(imageName string, containerName string) {
-    imagePath := "/CarteTest/image/" + imageName
-    imageTarPath := imagePath + ".tar"
+    // imagePath := "/CarteTest/image/" + imageName  --> 압축 해제 위치 잘못됨
+    imageTarPath := "/CarteTest/image/" + imageName + ".tar" // tar 이미지 경로
     containerPath := "/CarteTest/container/" + containerName
+    oldRootPath := containerPath + "/old-root"
 
     // 이미지 압축 해제
     if _, err := os.Stat(imageTarPath); err == nil {
         fmt.Println("Found tar file...")
-        if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-            if err := os.MkdirAll(imagePath, 0755); err != nil {
-                log.Fatalf("Failed to create image directory: %v", err)
+        if _, err := os.Stat(containerPath); os.IsNotExist(err) {
+            if err := os.MkdirAll(containerPath, 0755); err != nil {
+                log.Fatalf("Failed to create container directory: %v", err)
             }
         }
-        if err := extractTar(imageTarPath, imagePath); err != nil {
+        if err := extractTar(imageTarPath, containerPath); err != nil {
             log.Fatalf("Failed to extract tar file: %v", err)
         }
-    } else if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-        log.Fatalf("Image directory not found: %s", imagePath)
-    } else if err != nil {
-        log.Fatalf("Failed to check image directory: %v", err)
-    }
-
-    // 이건 그냥 컨테이너 경로 확인 - 컨테이너 경로를 이렇게 설정해도 되는가?
-    if _, err := os.Stat(containerPath); os.IsNotExist(err) {
-        if err := os.Mkdir(containerPath, 0755); err != nil && !os.IsExist(err) {
-            log.Fatalf("Failed to create container directory: %v", err)
+        if err := prepareContainer(containerPath, oldRootPath); err != nil {
+            fmt.Println("Error:", err)
+        } else {
+            fmt.Println("Container prepared successfully")
         }
+    } else if os.IsNotExist(err) {
+        log.Fatalf("Image file not found: %s", imageTarPath)
     } else {
-        fmt.Printf("Container %s already exists\n", containerName)
-        StartContainer(containerPath)
-        return
+        log.Fatalf("Error checking image file: %v", err)
     }
 
-    if err := pivotRoot(containerPath, imagePath); err != nil {
-    // if err := pivotRoot(imagePath, containerPath); err != nil {
-        log.Fatalf("Failed to pivot root: %v", err)
-    }
-
-    if err := setupCgroups(); err != nil {
-        log.Fatalf("Failed to set up cgroups: %v", err)
-    }
-
-    runInNewNamespace(containerPath, "/usr/sbin/nginx", []string{"-g", "daemon off;"})
+    // runInNewNamespace(containerPath, "/usr/sbin/nginx", []string{"-g", "daemon off;"})
 }
 
 
@@ -101,53 +87,38 @@ func extractTar(tarFile, destDir string) error {
 }
 
 // 루트 파일 시스템 변경 함수
-func pivotRoot(newRoot, oldRoot string) error {
-    // 새로운 루트 디렉토리와 기존 루트 디렉토리 생성
-
-
-    // Bind 마운트: 새로운 루트 디렉토리를 마운트
+func prepareContainer(newRoot, oldRoot string) error {
+    if err := os.MkdirAll(oldRoot, 0755); err != nil {
+        return fmt.Errorf("failed to create old root directory: %v", err)
+    }
     if err := mountBind(newRoot, newRoot); err != nil {
         return fmt.Errorf("failed to bind mount new root: %v", err)
     }
-
-    if err := os.MkdirAll(oldRoot, 0700); err != nil {
-        return fmt.Errorf("failed to create old root directory: %v", err)
-    }
-
-    // pivot_root 시스템 호출로 루트 파일 시스템 변경
     if err := syscall.PivotRoot(newRoot, oldRoot); err != nil {
         return fmt.Errorf("failed to pivot root: %v", err)
     }
-
-    // 문제 : PivotRoot전에 newRoot생성을 하는 바람에 컨테이너 생성으로 넘어가서 실행이 안됐었음(무한 대기), 순서 변경으로 해결
-    // 생성 문제 아님 : failed to pivot root: invalid argument 문제
-    if err := os.MkdirAll(newRoot, 0700); err != nil {
-        return fmt.Errorf("failed to create new root directory: %v", err)
-    }
-
-    // 루트 변경 후 새로운 루트로 작업 디렉토리 이동
     if err := os.Chdir("/"); err != nil {
         return fmt.Errorf("failed to change directory to new root: %v", err)
     }
-
-    // 기존 루트 파일 시스템을 언마운트
-    if err := syscall.Unmount(oldRoot, syscall.MNT_DETACH); err != nil {
-        return fmt.Errorf("failed to unmount old root: %v", err)
+    if err := setupSystemDirs(); err != nil {
+        return err
     }
-
-    // 기존 루트 디렉토리 삭제
-    if err := os.RemoveAll(oldRoot); err != nil {
-        return fmt.Errorf("failed to remove old root directory: %v", err)
-    }
-
     return nil
 }
 
-// Bind 마운트 함수
-func mountBind(target, mountPoint string) error {
-    // 마운트 시스템 호출 사용
-    if err := syscall.Mount(target, mountPoint, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
-        return fmt.Errorf("failed to bind mount: %v", err)
+func mountBind(source, target string) error {
+    return syscall.Mount(source, target, "", syscall.MS_BIND|syscall.MS_REC, "")
+}
+
+func setupSystemDirs() error {
+    if err := syscall.Mount("proc", "/proc", "proc", 0, ""); err != nil {
+        return fmt.Errorf("failed to mount /proc: %v", err)
+    }
+    if err := syscall.Mount("sysfs", "/sys", "sysfs", 0, ""); err != nil {
+        return fmt.Errorf("failed to mount /sys: %v", err)
+    }
+    if err := syscall.Mount("tmpfs", "/dev", "tmpfs", syscall.MS_NOSUID|syscall.MS_STRICTATIME, "mode=755"); err != nil {
+        return fmt.Errorf("failed to mount /dev: %v", err)
     }
     return nil
 }

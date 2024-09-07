@@ -3,6 +3,10 @@
 - 예시 : docker save -o nginx.tar nginx:latest
 
 ## rm: cannot remove 'nginx': Device or resource busy
+
+mount | grep testcontainer // 어떤 파일 시스템이 마운트되어 있는지 확인
+umount -l /CarteTest/container/testcontainer/sys // 강제 해제
+
 - mount | grep /CarteTest/image/nginx
 - umount /CarteTest/image/nginx
 
@@ -34,3 +38,35 @@
 - 기본 컨테이너 구현 가능
 - 특정 애플리케이션이나 프로세스를 격리된 환경에서 실행 가능함
 - => 자체 컨테이너 생성으로 진행
+
+## busybox 생성
+wget https://busybox.net/downloads/busybox-1.36.0.tar.bz2
+tar -xvjf busybox-1.36.0.tar.bz2
+cd busybox-1.36.0
+
+make defconfig
+make -j$(nproc)
+
+mkdir -p /CarteTest/image/mybusybox/bin
+cp busybox /CarteTest/image/mybusybox/bin/
+
+mkdir -p /CarteTest/image/mybusybox/{bin,sbin,etc,proc,sys,usr/bin,usr/sbin,dev,tmp,lib,lib64}
+
+echo "root:x:0:0:root:/root:/bin/sh" > /CarteTest/image/mybusybox/etc/passwd
+echo "root:x:0:" > /CarteTest/image/mybusybox/etc/group
+echo "nameserver 8.8.8.8" > /CarteTest/image/mybusybox/etc/resolv.conf
+
+ldd /CarteTest/image/mybusybox/bin/busybox
+
+cp /lib/x86_64-linux-gnu/libm.so.6 /CarteTest/image/mybusybox/lib/
+cp /lib/x86_64-linux-gnu/libresolv.so.2 /CarteTest/image/mybusybox/lib/
+cp /lib/x86_64-linux-gnu/libc.so.6 /CarteTest/image/mybusybox/lib/
+cp /lib64/ld-linux-x86-64.so.2 /CarteTest/image/mybusybox/lib64/
+
+chmod +x /CarteTest/image/mybusybox/bin/busybox
+
+ls -l /CarteTest/image/mybusybox/lib/
+ls -l /CarteTest/image/mybusybox/lib64/
+
+cd /CarteTest/image
+tar -cvf busybox.tar -C mybusybox .

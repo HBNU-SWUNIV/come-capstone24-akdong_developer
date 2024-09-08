@@ -8,14 +8,19 @@ import (
     "os"
     "os/exec"
     "path/filepath"
-    "syscall"
     "bufio"
     "strings"
     "golang.org/x/sys/unix"
+    "syscall" 
+    "time"
 )
 
-func CtCreate(imageName string, containerName string) {
-    imageTarPath := "/CarteTest/image/" + imageName + ".tar" // tar 이미지 경로
+// 1. 지금 CtCreate 넘어와서 StartContainer 하면 안되고(no such file or directory) 바로 StartContainer 실행하면 됨(원인 파악 필요)
+// --> 컨테이너 이미 존재하는 경우 또 생성하면서 오류 발생(if 위치가 잘못 명시되어 있었음), if문제가 아닌, 컨테이너 생성 후 바로 실행 불가에 따른 문제 였음
+
+// 컨테이너 생성(이미지 압축 해제)
+func CtCreate(imageName string, containerName string) error {
+    imageTarPath := "/CarteTest/image/" + imageName + ".tar"
     containerPath := "/CarteTest/container/" + containerName
 
     // 이미지 압축 해제
@@ -23,23 +28,23 @@ func CtCreate(imageName string, containerName string) {
         fmt.Println("Found tar file...")
         if _, err := os.Stat(containerPath); os.IsNotExist(err) {
             if err := os.MkdirAll(containerPath, 0755); err != nil {
-                log.Fatalf("Failed to create container directory: %v", err)
+                return fmt.Errorf("failed to create container directory: %v", err)
             }
-        }
-        if err := extractTar(imageTarPath, containerPath); err != nil {
-            log.Fatalf("Failed to extract tar file: %v", err)
-        }
-        if err := prepareContainer(containerPath); err != nil {
-            fmt.Println("Error:", err)
+            if err := extractTar(imageTarPath, containerPath); err != nil {
+                return fmt.Errorf("failed to extract tar file: %v", err)
+            }
+            if err := prepareContainer(containerPath); err != nil {
+                return fmt.Errorf("error preparing container: %v", err)
+            }
+            fmt.Println("Container created successfully")
         } else {
-            fmt.Println("Container prepared successfully")
+            fmt.Println("Container already prepared")
         }
     } else {
-        log.Fatalf("Image file not found: %s", imageTarPath)
+        return fmt.Errorf("image file not found: %s", imageTarPath)
     }
-    if err := StartContainer("/CarteTest/container/testcontainer"); err != nil {
-        log.Fatal(err)
-    }
+
+    return nil
 }
 
 // tar 파일 압축 해제
@@ -119,10 +124,6 @@ func prepareContainer(newRoot string) error {
     return nil
 }
 
-func mountBind(source, target string) error {
-    return syscall.Mount(source, target, "", syscall.MS_BIND|syscall.MS_REC, "")
-}
-
 func setupSystemDirs() error {
     // /proc 마운트 확인 후 마운트
     if !isMounted("/proc") {
@@ -144,8 +145,24 @@ func setupSystemDirs() error {
             return fmt.Errorf("failed to mount /dev: %v", err)
         }
     }
-
     return nil
+}
+
+// 마운트 여부 확인 함수
+func isMounted(target string) bool {
+    file, err := os.Open("/proc/mounts")
+    if err != nil {
+        return false
+    }
+    defer file.Close()
+
+    scanner := bufio.NewScanner(file)
+    for scanner.Scan() {
+        if strings.Contains(scanner.Text(), target) {
+            return true
+        }
+    }
+    return false
 }
 
 func createDevFiles() error {
@@ -182,63 +199,32 @@ func createDevFiles() error {
     return nil
 }
 
-// 마운트 여부 확인 함수
-func isMounted(target string) bool {
-    file, err := os.Open("/proc/mounts")
-    if err != nil {
-        return false
-    }
-    defer file.Close()
-
-    scanner := bufio.NewScanner(file)
-    for scanner.Scan() {
-        if strings.Contains(scanner.Text(), target) {
-            return true
-        }
-    }
-    return false
-}
-
-// cgroups 설정
-func setupCgroups() error {
-    cgroupsPath := "/CarteTest/cgroup" // 사용자 지정 경로
-    if err := os.MkdirAll(cgroupsPath, 0755); err != nil {
-        return fmt.Errorf("failed to create cgroup path: %v", err)
-    }
-
-    // CPU 제한 설정 예시
-    cpuPath := filepath.Join(cgroupsPath, "cpu/testcontainer")
-    if err := os.MkdirAll(cpuPath, 0755); err != nil {
-        return fmt.Errorf("failed to create CPU cgroup path: %v", err)
-    }
-    if err := os.WriteFile(filepath.Join(cpuPath, "cpu.shares"), []byte("512"), 0644); err != nil {
-        return fmt.Errorf("failed to set CPU shares: %v", err)
-    }
-
-    return nil
-}
-
 // 새로운 네임스페이스에서 명령어 실행
 func runInNewNamespace(containerPath, path string, args []string) error {
+    // chroot 전 경로 확인
     fullPath := filepath.Join(containerPath, path)
-    fmt.Printf("Before chroot, checking fullPath: %s\n", fullPath)
+    fmt.Printf("Before chroot, checking path: %s\n", fullPath)
     if _, err := os.Stat(fullPath); err != nil {
-        return fmt.Errorf("before chroot: fullPath not found: %v", err)
+        return fmt.Errorf("before chroot: command not found: %v", err)
     }
 
+    // chroot 적용
     if err := syscall.Chroot(containerPath); err != nil {
         return fmt.Errorf("failed to apply chroot to container path: %v", err)
     }
     fmt.Println("Chroot applied successfully")
 
+    // chroot 적용 후에는 더 이상 fullPath를 사용할 수 없음
     if _, err := os.Stat(path); err != nil {
-        return fmt.Errorf("after chroot: path not found: %v", err)
+        return fmt.Errorf("after chroot: command not found: %v", err)
     }
 
+    // 루트 디렉토리로 이동
     if err := os.Chdir("/"); err != nil {
         return fmt.Errorf("failed to change to new root directory: %v", err)
     }
 
+    // 명령 실행
     cmd := exec.Command(path, args...)
     cmd.SysProcAttr = &syscall.SysProcAttr{
         Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET,
@@ -247,6 +233,7 @@ func runInNewNamespace(containerPath, path string, args []string) error {
     cmd.Stdout = os.Stdout
     cmd.Stderr = os.Stderr
 
+    // 명령 실행
     fmt.Println("Starting command execution")
     if err := cmd.Run(); err != nil {
         return fmt.Errorf("failed to run command in new namespace: %v", err)
@@ -256,17 +243,70 @@ func runInNewNamespace(containerPath, path string, args []string) error {
     return nil
 }
 
-
-func StartContainer(containerPath string) error {
+func startContainer(containerPath string) error {
     return runInNewNamespace(containerPath, "/bin/busybox", []string{"httpd", "-f", "-p", "8080"})
 }
 
-// func main() {
-//     if err := StartContainer("/CarteTest/container/testcontainer"); err != nil {
-//         log.Fatal(err)
-//     }
-// }
+func setupCgroups(containerPath string) error {
+    cgroupRoot := "/CarteTest/cgroup"
+    pid := os.Getpid()
+
+    if err := os.MkdirAll(cgroupRoot, 0755); err != nil {
+        return fmt.Errorf("failed to create cgroup path: %v", err)
+    }
+
+    // CPU 리소스 설정
+    cpuLimitPath := filepath.Join(cgroupRoot, "cpu", "myContainerGroup")
+    if err := os.MkdirAll(cpuLimitPath, 0755); err != nil {
+        return fmt.Errorf("failed to create cgroup for cpu: %v", err)
+    }
+
+    // CPU 쿼터 설정 (100000us = 100ms every 100ms)
+    if err := os.WriteFile(filepath.Join(cpuLimitPath, "cpu.cfs_quota_us"), []byte("100000"), 0644); err != nil {
+        return fmt.Errorf("failed to set cpu quota: %v", err)
+    }
+
+    // 현재 프로세스(컨테이너 프로세스)를 새 cgroup에 추가
+    if err := os.WriteFile(filepath.Join(cpuLimitPath, "tasks"), []byte(fmt.Sprintf("%d", pid)), 0644); err != nil {
+        return fmt.Errorf("failed to add process to cgroup: %v", err)
+    }
+
+    return nil
+}
 
 func main() {
-    CtCreate("busybox", "testcontainer")
+    containerName := "testcontainer"
+    imageName := "busybox"
+    containerPath := "/CarteTest/container/" + containerName
+
+    // 컨테이너 환경 설정
+    if err := CtCreate(imageName, containerName); err != nil {
+        log.Fatal("Failed to create container:", err)
+    }
+
+    // cgroups 설정
+    if err := setupCgroups(containerPath); err != nil {
+        log.Fatal("Failed to setup cgroups:", err)
+    }
+
+    // 파일 시스템 동기화 강화
+    syscall.Sync()  // 동기화 호출
+    time.Sleep(2 * time.Second)  // 동기화가 시스템에 반영될 시간을 기다림 // --> 컨테이너 생성후, 실행까지 바로 적용이 안됨(CLI 제작을 통해서 함수 나눈거대로 생성, 실행 바꾸기)
+
+    // 컨테이너 실행
+    fmt.Println("Attempting to start container...")
+    if err := startContainer(containerPath); err != nil {
+        log.Fatal("Failed to start container:", err)
+    } else {
+        fmt.Println("Container started successfully. Checking port binding...")
+        time.Sleep(5 * time.Second)  // 시간 지연 후 포트 체크
+        cmd := exec.Command("sh", "-c", "netstat -tulnp | grep :8080 || ss -tulnp | grep :8080")
+        cmd.Stdout = os.Stdout
+        cmd.Stderr = os.Stderr
+        if err := cmd.Run(); err != nil {
+            fmt.Println("Failed to check port binding:", err)
+        }
+    }
 }
+
+

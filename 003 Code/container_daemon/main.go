@@ -227,7 +227,8 @@ func runInNewNamespace(containerPath, path string, args []string) error {
     // 명령 실행
     cmd := exec.Command(path, args...)
     cmd.SysProcAttr = &syscall.SysProcAttr{
-        Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET,
+        Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS,
+        // CLONE_NEWNET 플래그를 제거했습니다.
     }
     cmd.Stdin = os.Stdin
     cmd.Stdout = os.Stdout
@@ -309,4 +310,11 @@ func main() {
     }
 }
 
-
+/* 
+해야할 것
+0. 컨테이너 생성 및 실행 (o) 
+1. 컨테이너 종료
+2. 컨테이너 삭제
+3. 컨테이너 재시작
+4. 명령어 구분
+*/

@@ -90,7 +90,8 @@ func runInNewNamespace(containerPath, path string, args []string) error {
 }
 
 func startContainer(containerPath string) error {
-    return runInNewNamespace(containerPath, "/bin/busybox", []string{"httpd", "-f", "-p", "8080"})
+	// /CarteTest/container/testcontainer/www(생성)/index.html(생성)
+	return runInNewNamespace(containerPath, "/bin/busybox", []string{"httpd", "-f", "-p", "8080", "-h", "/www"})
 }
 
 func setupCgroups(containerPath string) error {

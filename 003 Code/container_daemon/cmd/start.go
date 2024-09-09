@@ -32,7 +32,7 @@ var startCmd = &cobra.Command{
 		fmt.Println("Attempting to start container...")
 
 		// 컨테이너 시작 (명령 실행)
-		if err := startContainer(containerPath); err != nil {
+		if err := startContainer(containerPath, containerName); err != nil {
 			return fmt.Errorf("error starting container: %v", err)
 		}
 
@@ -45,7 +45,7 @@ func init(){
 }
 
 // 새로운 네임스페이스에서 명령어 실행
-func runInNewNamespace(containerPath, path string, args []string) error {
+func runInNewNamespace(containerPath, path string, args []string, containerName string) error {
     // chroot 전 경로 확인
     fullPath := filepath.Join(containerPath, path)
     fmt.Printf("Before chroot, checking path: %s\n", fullPath)
@@ -89,9 +89,9 @@ func runInNewNamespace(containerPath, path string, args []string) error {
     return nil
 }
 
-func startContainer(containerPath string) error {
+func startContainer(containerPath, containerName string) error {
 	// /CarteTest/container/testcontainer/www(생성)/index.html(생성)
-	return runInNewNamespace(containerPath, "/bin/busybox", []string{"httpd", "-f", "-p", "8080", "-h", "/www"})
+	return runInNewNamespace(containerPath, "/bin/busybox", []string{"httpd", "-f", "-p", "8080", "-h", "/www"}, containerName)
 }
 
 func setupCgroups(containerPath string) error {

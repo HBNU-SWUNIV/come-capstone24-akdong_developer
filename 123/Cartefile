@@ -1,0 +1,8 @@
+# Cartefile example
+RUN apt-get update
+RUN apt-get install -y curl
+COPY . /app
+WORKDIR /app
+RUN go build -o carte
+CMD ["./carte"]
+

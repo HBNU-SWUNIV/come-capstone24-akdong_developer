@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  mongo:
+    image: mongo:latest
+    container_name: map_mongo
+    ports:
+      - "27016:27016"  # 외부 포트 27016을 컨테이너의 27016 포트에 매핑
+    volumes:
+      - mongo-data:/data/db
+    command: ["mongod", "--port", "27016"]  # MongoDB를 27016 포트로 실행
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: map
+    ports:
+      - "8070:8070"
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URL: mongodb://mongo:27016  # 내부적으로 27016 포트를 사용
+
+volumes:
+  mongo-data:

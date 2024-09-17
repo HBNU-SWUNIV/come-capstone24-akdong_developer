@@ -1,0 +1,8 @@
+FROM ubuntu:20.04
+WORKDIR /app
+COPY . /app
+RUN apt-get update && apt-get install -y python3
+ENV APP_ENV=production
+EXPOSE 8080
+CMD ["python3", "app.py"]
+

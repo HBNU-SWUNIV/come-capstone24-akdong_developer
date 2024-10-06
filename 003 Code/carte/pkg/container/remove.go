@@ -1,47 +1,47 @@
 package container
 
 import (
-    "encoding/json"
     "fmt"
     "io/ioutil"
-    "log"
     "os"
     "path/filepath"
 )
 
-// removeContainer 함수: 주어진 컨테이너 이름으로 컨테이너를 삭제
+// 컨테이너 제거 함수
 func RemoveContainer(name string) {
     containersDir := "/var/run/carte/containers/"
+    containerFile := filepath.Join(containersDir, name+".json")
 
-    // 해당 컨테이너의 정보를 읽기 위해 파일 확인
-    containerFile := filepath.Join(containersDir, name + ".json")
-    if _, err := os.Stat(containerFile); os.IsNotExist(err) {
-        fmt.Printf("컨테이너 %s를 찾을 수 없습니다.\n", name)
-        return
-    }
-
-    // 컨테이너 정보 파일 읽기
-    containerData, err := ioutil.ReadFile(containerFile)
+    // 컨테이너 정보 로드
+    containerInfo, err := loadContainerInfo(containerFile)
     if err != nil {
-        log.Fatalf("컨테이너 정보 파일 읽기 실패: %v", err)
+        fmt.Printf("컨테이너 정보 로드 실패: %v\n", err)
+        return
     }
 
-    var containerInfo ContainerInfo
-    if err := json.Unmarshal(containerData, &containerInfo); err != nil {
-        log.Fatalf("JSON 파싱 실패: %v", err)
-    }
-
-    // 컨테이너 상태 확인 (실행 중인 경우 삭제 불가)
+    // 컨테이너가 실행 중인지 확인
     if containerInfo.Status == "running" {
-        fmt.Printf("실행 중인 컨테이너 %s는 삭제할 수 없습니다. 먼저 정지시켜야 합니다.\n", name)
+        fmt.Println("실행 중인 컨테이너를 제거할 수 없습니다. 먼저 중지하세요.")
         return
     }
 
-    // 컨테이너 정보 파일 삭제
+    // 컨테이너 파일 삭제
     if err := os.Remove(containerFile); err != nil {
-        fmt.Printf("컨테이너 정보 파일 삭제 실패: %v\n", err)
+        fmt.Printf("컨테이너 파일 삭제 실패: %v\n", err)
         return
     }
 
-    fmt.Printf("컨테이너 %s가 삭제되었습니다.\n", name)
+    fmt.Printf("컨테이너 %s가 제거되었습니다.\n", name)
 }
+
+// 컨테이너 정보 로드 함수
+func loadContainerInfo(filePath string) (ContainerInfo, error) {
+    var containerInfo ContainerInfo
+    data, err := ioutil.ReadFile(filePath)
+    if err != nil {
+        return containerInfo, err
+    }
+    err = json.Unmarshal(data, &containerInfo)
+    return containerInfo, err
+}
+

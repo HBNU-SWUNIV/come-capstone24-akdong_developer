@@ -9,9 +9,10 @@ import (
     "syscall"
     "time"
     "path/filepath"
-    "strconv"
     "github.com/google/uuid"
     "carte/pkg/subsystem"
+    "carte/pkg/utils"
+    "golang.org/x/sys/unix"
 )
 
 // 컨테이너 정보 구조체
@@ -27,12 +28,40 @@ type ContainerInfo struct {
     ExitCode  int               `json:"exit_code,omitempty"`
 }
 
-// RunContainer 실행 시 파라미터로 이름과 이미지 지정
-func RunContainer(name, image, cpuLimit, memoryLimit string) {
-    // 이미지에 따른 실행 프로세스 설정
-    cmd := exec.Command(image)  // 예시로 이미지 이름을 실행 파일로 처리
+// nextAvailableIP는 새로운 컨테이너에 할당할 IP 주소를 관리합니다.
+var nextAvailableIP = 100 // 초기 IP 설정
+
+// getNextAvailableIP 함수는 다음 사용 가능한 IP 주소를 반환합니다.
+func getNextAvailableIP() string {
+    ipAddr := fmt.Sprintf("192.168.1.%d", nextAvailableIP)
+    nextAvailableIP++
+    if nextAvailableIP > 254 { // 서브넷 제한
+        nextAvailableIP = 100 // IP 주소를 재설정
+    }
+    return ipAddr
+}
+
+// RunContainer 함수는 컨테이너를 실행합니다.
+func RunContainer(name, imageID, cpuLimit, memoryLimit string) {
+    imagesDir := "/var/run/carte/images/"
+    imagePath := filepath.Join(imagesDir, imageID)
+
+    if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+        fmt.Printf("이미지 %s를 찾을 수 없습니다.\n", imageID)
+        return
+    }
+
+    // 브리지 설정 자동화
+    if err := subsystem.SetupBridge(); err != nil {
+        fmt.Println("브리지 설정 실패:", err)
+        return
+    }
+
+    // 컨테이너 실행 설정
+    cmd := exec.Command("/bin/sh") // 기본으로 /bin/sh를 실행 (추후 필요시 변경 가능)
     cmd.SysProcAttr = &syscall.SysProcAttr{
         Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET | syscall.CLONE_NEWIPC,
+        AmbientCaps: []uintptr{unix.CAP_NET_ADMIN},
     }
 
     cmd.Stdin = os.Stdin
@@ -44,11 +73,24 @@ func RunContainer(name, image, cpuLimit, memoryLimit string) {
         return
     }
 
-    // 네트워크 정보 동적 할당
-    containerID := fmt.Sprintf("%d", cmd.Process.Pid)
-    ipAddr := "192.168.1." + containerID // 예시 IP 주소
+    fmt.Printf("컨테이너가 PID %d에서 실행 중입니다.\n", cmd.Process.Pid)
 
-    if err := subsystem.SetupNetworkNamespace(containerID, ipAddr); err != nil {
+    containerID := fmt.Sprintf("%d", cmd.Process.Pid)
+    vethHost := "veth_" + containerID
+    vethContainer := "eth0_" + containerID
+
+    // 새로운 IP 주소 할당
+    ipAddr := getNextAvailableIP()
+    fmt.Printf("컨테이너에 할당된 IP: %s\n", ipAddr)
+
+    // veth 페어 설정
+    if err := subsystem.SetupVethPair(containerID, vethHost, vethContainer); err != nil {
+        fmt.Println("veth 설정 실패:", err)
+        return
+    }
+
+    // 네임스페이스에서 veth 활성화 및 IP 할당
+    if err := subsystem.ActivateVethInContainer(containerID, vethContainer, ipAddr); err != nil {
         fmt.Println("네트워크 설정 실패:", err)
         return
     }
@@ -68,7 +110,7 @@ func RunContainer(name, image, cpuLimit, memoryLimit string) {
         "ip_address": ipAddr,
     }
 
-    saveContainerInfo(cmd.Process.Pid, name, image, networkInfo, resourcesInfo)
+    saveContainerInfo(cmd.Process.Pid, name, imageID, networkInfo, resourcesInfo)
 
     if err := cmd.Wait(); err != nil {
         fmt.Println("컨테이너 종료 실패:", err)
@@ -80,14 +122,12 @@ func RunContainer(name, image, cpuLimit, memoryLimit string) {
 // 컨테이너 정보를 저장하는 함수
 func saveContainerInfo(pid int, name, image string, networkInfo, resourcesInfo map[string]string) {
     containersDir := "/var/run/carte/containers/"
-    createDirIfNotExists(containersDir)
+    utils.CreateDirIfNotExists(containersDir) // 중복된 함수 대신 utils 사용
 
-    // 이름이 없으면 기본 이름 생성
     if name == "" {
         name = fmt.Sprintf("container-%d", pid)
     }
 
-    // 컨테이너 정보 생성
     containerInfo := ContainerInfo{
         ID:        uuid.New().String(),
         Name:      name,
@@ -99,7 +139,6 @@ func saveContainerInfo(pid int, name, image string, networkInfo, resourcesInfo m
         CreatedAt: time.Now().Format(time.RFC3339),
     }
 
-    // 컨테이너 정보를 JSON으로 변환하여 파일로 저장
     containerData, err := json.MarshalIndent(containerInfo, "", "    ")
     if err != nil {
         fmt.Println("컨테이너 정보 저장 실패:", err)
@@ -112,11 +151,6 @@ func saveContainerInfo(pid int, name, image string, networkInfo, resourcesInfo m
     }
 }
 
-// 중복되는 디렉토리 생성 로직을 함수로 분리
-func createDirIfNotExists(dir string) {
-    if _, err := os.Stat(dir); os.IsNotExist(err) {
-        os.MkdirAll(dir, 0755)
-    }
-}
+
 
 

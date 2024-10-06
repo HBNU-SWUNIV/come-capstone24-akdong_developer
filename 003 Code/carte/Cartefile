@@ -1,3 +1,7 @@
-FROM busybox
-RUN echo "Hello, Carte!"
-RUN touch /testfile
+FROM ubuntu
+RUN apt-get update
+RUN apt-get install -y python3
+
+
+
+

@@ -2,14 +2,13 @@ package container
 
 import (
     "archive/tar"
-    "bufio"
+    "bufio"       // bufio 사용 복구
     "fmt"
     "io"
     "io/ioutil"
     "os"
-    "os/exec"
     "path/filepath"
-    "strings"
+    "strings"     // strings 사용 복구
     "github.com/google/uuid"
 )
 
@@ -19,35 +18,42 @@ type BuildConfig struct {
     Commands  []string // RUN 명령어들
 }
 
-// buildContainer 함수: Cartefile을 읽고 이미지 빌드
+// buildContainer 함수 내에서 이미지 경로 확인 로직
 func BuildContainer(cartefilePath string, imageName string) {
     imagesDir := "/var/run/carte/images/"
     createDirIfNotExists(imagesDir)
+
+    // 이미지 경로 출력
+    fmt.Printf("이미지 경로 확인: %s\n", imagesDir)
 
     imageID := uuid.New().String() // 이미지 ID 생성
     imagePath := filepath.Join(imagesDir, imageID)
     createDirIfNotExists(imagePath)
 
-    // 1. Cartefile 읽기
+    // Cartefile 읽기
     buildConfig, err := parseCartefile(cartefilePath)
     if err != nil {
         fmt.Printf("Cartefile 읽기 실패: %v\n", err)
         return
     }
 
-    // 2. 베이스 이미지 파일 시스템 복사
+    // 베이스 이미지 경로 확인
     baseImagePath := filepath.Join(imagesDir, buildConfig.BaseImage)
-    if _, err := os.Stat(baseImagePath); os.IsNotExist(err) {
+    fmt.Printf("베이스 이미지 경로 확인: %s\n", baseImagePath)
+
+    // 해당 경로가 올바른지 확인
+    if _, err := os.Stat(filepath.Join(baseImagePath, "blobs")); os.IsNotExist(err) {
         fmt.Printf("베이스 이미지 %s를 찾을 수 없습니다.\n", buildConfig.BaseImage)
         return
     }
+
     err = copyBaseImageLayer(baseImagePath, imagePath)
     if err != nil {
         fmt.Printf("베이스 이미지 레이어 복사 실패: %v\n", err)
         return
     }
 
-    // 3. RUN 명령어 실행 및 레이어 생성
+    // RUN 명령어 실행 및 레이어 생성
     for _, cmd := range buildConfig.Commands {
         fmt.Printf("명령어 실행: %s\n", cmd)
         err := executeCommandAndCreateLayer(cmd, imagePath)
@@ -57,7 +63,7 @@ func BuildContainer(cartefilePath string, imageName string) {
         }
     }
 
-    // 4. 이미지 메타데이터(config.json) 작성
+    // 이미지 메타데이터(config.json) 작성
     config := generateOCIConfig(buildConfig)
     configPath := filepath.Join(imagePath, "config.json")
     if err := ioutil.WriteFile(configPath, config, 0644); err != nil {
@@ -65,10 +71,13 @@ func BuildContainer(cartefilePath string, imageName string) {
         return
     }
 
+    // 이미지 이름과 ID를 repositories 파일에 기록
+    updateRepositories(imageName, imageID, imagesDir)
+
     fmt.Printf("이미지 %s가 성공적으로 빌드되었습니다. ID: %s\n", imageName, imageID)
 }
 
-// Cartefile을 읽어서 BuildConfig로 변환하는 함수
+// parseCartefile 함수: Cartefile을 읽고 BuildConfig 구조체를 반환하는 함수
 func parseCartefile(cartefilePath string) (BuildConfig, error) {
     file, err := os.Open(cartefilePath)
     if err != nil {
@@ -76,15 +85,16 @@ func parseCartefile(cartefilePath string) (BuildConfig, error) {
     }
     defer file.Close()
 
-    scanner := bufio.NewScanner(file)
     var config BuildConfig
 
+    // 간단하게 파일에서 FROM과 RUN을 찾아 파싱하는 예시
+    scanner := bufio.NewScanner(file)
     for scanner.Scan() {
-        line := strings.TrimSpace(scanner.Text())
+        line := scanner.Text()
         if strings.HasPrefix(line, "FROM ") {
-            config.BaseImage = strings.TrimPrefix(line, "FROM ")
+            config.BaseImage = strings.TrimSpace(strings.TrimPrefix(line, "FROM "))
         } else if strings.HasPrefix(line, "RUN ") {
-            config.Commands = append(config.Commands, strings.TrimPrefix(line, "RUN "))
+            config.Commands = append(config.Commands, strings.TrimSpace(strings.TrimPrefix(line, "RUN ")))
         }
     }
 
@@ -92,32 +102,71 @@ func parseCartefile(cartefilePath string) (BuildConfig, error) {
         return BuildConfig{}, err
     }
 
-    if config.BaseImage == "" {
-        return BuildConfig{}, fmt.Errorf("베이스 이미지가 정의되지 않았습니다.")
-    }
-
     return config, nil
 }
 
-// 베이스 이미지 복사 함수 (이전과 동일)
+// 베이스 이미지 복사 함수
 func copyBaseImageLayer(baseImagePath, imagePath string) error {
-    srcFile, err := os.Open(filepath.Join(baseImagePath, "layer.tar"))
+    blobsPath := filepath.Join(baseImagePath, "blobs", "sha256")
+    
+    // 블랍 디렉토리 확인
+    blobFiles, err := ioutil.ReadDir(blobsPath)
     if err != nil {
-        return err
+        return fmt.Errorf("블랍 디렉토리 읽기 실패: %v", err)
     }
-    defer srcFile.Close()
 
-    dstFile, err := os.Create(filepath.Join(imagePath, "layer.tar"))
+    // layer 디렉토리 생성
+    layerPath := filepath.Join(imagePath, "layer")
+    err = os.MkdirAll(layerPath, 0755)
     if err != nil {
-        return err
+        return fmt.Errorf("layer 디렉토리 생성 실패: %v", err)
     }
-    defer dstFile.Close()
 
-    _, err = io.Copy(dstFile, srcFile)
-    return err
+    // 블랍 파일들을 하나씩 복사
+    for _, blobFile := range blobFiles {
+        srcFilePath := filepath.Join(blobsPath, blobFile.Name())
+        dstFilePath := filepath.Join(layerPath, blobFile.Name()) // 각 블랍 파일을 layer 디렉토리로 복사
+
+        fmt.Printf("블랍 파일 복사 중: %s -> %s\n", srcFilePath, dstFilePath)
+
+        srcFile, err := os.Open(srcFilePath)
+        if err != nil {
+            return fmt.Errorf("블랍 파일 열기 실패: %v", err)
+        }
+        defer srcFile.Close()
+
+        dstFile, err := os.Create(dstFilePath)
+        if err != nil {
+            return fmt.Errorf("블랍 파일 복사 실패: %v", err)
+        }
+        defer dstFile.Close()
+
+        _, err = io.Copy(dstFile, srcFile)
+        if err != nil {
+            return fmt.Errorf("블랍 파일 복사 중 오류 발생: %v", err)
+        }
+    }
+
+    return nil
 }
 
-// 명령어 실행 및 레이어 생성 함수 (이전과 동일)
+// 이미지 이름과 ID를 repositories 파일에 기록하는 함수
+func updateRepositories(imageName, imageID, imagesDir string) {
+    reposFile := filepath.Join(imagesDir, "repositories")
+    file, err := os.OpenFile(reposFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil {
+        fmt.Printf("repositories 파일 열기 실패: %v\n", err)
+        return
+    }
+    defer file.Close()
+
+    entry := fmt.Sprintf("%s: %s\n", imageName, imageID)
+    if _, err := file.WriteString(entry); err != nil {
+        fmt.Printf("repositories 파일에 기록 실패: %v\n", err)
+    }
+}
+
+// 명령어 실행 및 레이어 생성 함수
 func executeCommandAndCreateLayer(command, imagePath string) error {
     layerPath := filepath.Join(imagePath, "new_layer.tar")
     tarFile, err := os.Create(layerPath)
@@ -141,7 +190,7 @@ func executeCommandAndCreateLayer(command, imagePath string) error {
     return nil
 }
 
-// OCI 메타데이터 생성 함수 (이전과 동일)
+// OCI 메타데이터 생성 함수
 func generateOCIConfig(buildConfig BuildConfig) []byte {
     config := fmt.Sprintf(`
 {
@@ -173,7 +222,7 @@ func generateOCIConfig(buildConfig BuildConfig) []byte {
     return []byte(config)
 }
 
-// 중복되는 디렉토리 생성 함수 (이전과 동일)
+// 중복되는 디렉토리 생성 함수
 func createDirIfNotExists(dir string) {
     if _, err := os.Stat(dir); os.IsNotExist(err) {
         os.MkdirAll(dir, 0755)

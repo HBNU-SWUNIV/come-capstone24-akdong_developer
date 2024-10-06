@@ -3,6 +3,7 @@ package container
 import (
     "fmt"
     "io/ioutil"
+    "path/filepath"
     "syscall"
     "encoding/json"
 )

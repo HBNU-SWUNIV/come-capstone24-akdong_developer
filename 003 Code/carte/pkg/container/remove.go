@@ -2,9 +2,10 @@ package container
 
 import (
     "fmt"
-    "io/ioutil"
     "os"
     "path/filepath"
+    "io/ioutil"
+    "encoding/json"
 )
 
 // 컨테이너 제거 함수
@@ -44,4 +45,5 @@ func loadContainerInfo(filePath string) (ContainerInfo, error) {
     err = json.Unmarshal(data, &containerInfo)
     return containerInfo, err
 }
+
 

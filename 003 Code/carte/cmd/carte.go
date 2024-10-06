@@ -3,7 +3,8 @@ package main
 import (
     "fmt"
     "os"
-    "carte/pkg/container"
+
+	"carte/pkg/container"
 )
 
 func main() {
@@ -28,20 +29,37 @@ func main() {
     case "list_c":
         container.ListContainer()
     case "stop":
-        name := os.Args[2]
-        container.StopContainer(name)
+		if len(os.Args) < 3 {
+			fmt.Println("사용법: carte stop <컨테이너 이름>")
+			return
+		}
+		name := os.Args[2]
+		container.StopContainer(name)
     case "start":
-        name := os.Args[2]
-        container.StartContainer(name)
+		if len(os.Args) < 3 {
+			fmt.Println("사용법: carte start <컨테이너 이름>")
+			return
+		}
+		name := os.Args[2]
+		container.StartContainer(name)
     case "remove":
-        name := os.Args[2]
-        container.RemoveContainer(name)
+		if len(os.Args) < 3 {
+			fmt.Println("사용법: carte remove <컨테이너 이름>")
+			return
+		}
+		name := os.Args[2]
+		container.RemoveContainer(name)
     case "list_i":
         container.ListImage()
     case "build":
-        cartefilePath := os.Args[2]
-        imageName := os.Args[3]
-        container.BuildContainer(cartefilePath, imageName)
+		if len(os.Args) < 3 {
+			fmt.Println("사용법: carte build <Cartefile 경로> <이미지 이름>")
+			return
+		}
+		cartefilePath := os.Args[2]
+		imageName := os.Args[3]
+		container.BuildContainer(cartefilePath, imageName)
+	
     default:
         fmt.Println("알 수 없는 명령어:", cmd)
     }

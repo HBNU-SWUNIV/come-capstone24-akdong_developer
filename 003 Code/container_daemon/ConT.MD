@@ -70,3 +70,5 @@ ls -l /CarteTest/image/mybusybox/lib64/
 
 cd /CarteTest/image
 tar -cvf busybox.tar -C mybusybox .
+
+

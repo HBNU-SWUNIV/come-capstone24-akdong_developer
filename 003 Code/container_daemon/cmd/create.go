@@ -15,18 +15,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var containerName string
 // 컨테이너 생성
 var createCmd = &cobra.Command{
-	Use: "create",
+	Use: "create [imageName]",
 	Short: "Container create",
+    Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-        containerName := "testcontainer"
-        imageName := "busybox"
+        imageName := args[0]
+        // containerName := imageName
+        if containerName == "" {
+            containerName = imageName
+        }
         return CtCreate(imageName, containerName)
     },
 }
 
 func init(){
+    createCmd.Flags().StringVarP(&containerName, "output", "o", "", "Container name (optional)")
     rootCmd.AddCommand(createCmd)
 }
 

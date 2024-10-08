@@ -9,7 +9,7 @@ import (
 
 // 이미지 목록을 확인하는 커맨드
 var imageListCmd = &cobra.Command{
-    Use:   "image",
+    Use:   "list_i",
     Short: "List images",
     RunE: func(cmd *cobra.Command, args []string) error {
         return listImages("/CarteTest/image")

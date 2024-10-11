@@ -17,7 +17,7 @@ import (
 var startCmd = &cobra.Command{
 	Use:   "start [containerName]",
 	Short: "Container start",
-	RunE: func(cmd *cobra.Command, args []string) error {  // err 타입을 error로 변경
+	RunE: func(cmd *cobra.Command, args []string) error { 
 		containerName := args[0]
         //containerName := "testcontainer"
 		containerPath := "/CarteTest/container/" + containerName
@@ -76,8 +76,21 @@ func runInNewNamespace(containerPath, path string, args []string, containerName 
     // 명령 실행
     cmd := exec.Command(path, args...)
     cmd.SysProcAttr = &syscall.SysProcAttr{
-        Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS,
+        
+        // Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS,
+        Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET, //syscall.CLONE_NEWUSER,
+        // UidMappings: []syscall.SysProcIDMap{
+        //     {ContainerID: 0, HostID: os.Getuid(), Size: 1},
+        // },
+        // GidMappings: []syscall.SysProcIDMap{
+        //     {ContainerID: 0, HostID: os.Getgid(), Size: 1},
+        // },
+        // Credential: &syscall.Credential{
+        //     Uid: uint32(os.Getuid()),
+        //     Gid: uint32(os.Getgid()),
+        // },
     }
+    
     cmd.Stdin = os.Stdin
     cmd.Stdout = os.Stdout
     cmd.Stderr = os.Stderr
@@ -97,7 +110,8 @@ func runInNewNamespace(containerPath, path string, args []string, containerName 
 func startContainer(containerPath, containerName string) error {
     // /CarteTest/container/testcontainer/www(생성)/index.html(생성)
 
-    cmd, err := runInNewNamespace(containerPath, "/bin/busybox", []string{"httpd", "-f", "-p", "8080", "-h", "/www"}, containerName)
+    cmd, err := runInNewNamespace(containerPath, "/bin/busybox", []string{"sh"}, containerName)
+    // cmd, err := runInNewNamespace(containerPath, "/bin/busybox", []string{"httpd", "-f", "-p", "8080", "-h", "/www"}, containerName)
     if err != nil {
         return fmt.Errorf("failed to start container in new namespace: %v", err)
     }

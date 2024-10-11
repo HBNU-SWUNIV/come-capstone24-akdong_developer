@@ -26,6 +26,14 @@ func init() {
 // 컨테이너 중지 함수 ///////////////////////////////////// bin/busybox말고 다른 이미지도 사용가능하도록 ///////
 func stopContainer(containerName string) error {
     // 컨테이너와 관련된 PID 찾기
+    // 마운트 해제 (umount)
+    if err := unmountContainer(containerName); err != nil {
+        return fmt.Errorf("failed to unmount container %s: %v", containerName, err)
+    }
+
+    fmt.Printf("Container %s unmounted successfully\n", containerName)
+    
+    
     pid, err := getContainerPID("/bin/busybox")
     if err != nil {
         return fmt.Errorf("failed to get PID for container %s: %v", containerName, err)
@@ -45,12 +53,7 @@ func stopContainer(containerName string) error {
 
     fmt.Printf("Remove PID")
 
-    // 마운트 해제 (umount)
-    if err := unmountContainer(containerName); err != nil {
-        return fmt.Errorf("failed to unmount container %s: %v", containerName, err)
-    }
-
-    fmt.Printf("Container %s unmounted successfully\n", containerName)
+    
     return nil
 }
 

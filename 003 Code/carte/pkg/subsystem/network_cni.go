@@ -4,13 +4,11 @@ import (
     "context"
     "fmt"
     "github.com/containernetworking/cni/libcni"
-    // "github.com/containernetworking/cni/pkg/types"
     "github.com/containernetworking/cni/pkg/types/040" // CNI types version
     "os"
     "path/filepath"
 )
 
-// SetupCNINetwork 함수는 CNI 네트워크를 설정합니다.
 func SetupCNINetwork(containerID string) (string, error) {
     cniConfPath := "/etc/cni/net.d"
     cniPath := "/opt/cni/bin"
@@ -36,22 +34,24 @@ func SetupCNINetwork(containerID string) (string, error) {
     var networkConfig *libcni.NetworkConfigList
     if filepath.Ext(confFiles[0]) == ".conflist" {
         networkConfig, err = libcni.ConfListFromBytes(confBytes)
+        if err != nil {
+            return "", fmt.Errorf("CNI ConfList 생성 실패: %v", err)
+        }
     } else {
         conf, err := libcni.ConfFromBytes(confBytes)
         if err != nil {
             return "", fmt.Errorf("CNI Conf 생성 실패: %v", err)
         }
         networkConfig, err = libcni.ConfListFromConf(conf)
+        if err != nil {
+            return "", fmt.Errorf("CNI 네트워크 설정 실패: %v", err)
+        }
     }
 
-    if err != nil {
-        return "", fmt.Errorf("CNI 네트워크 구성 실패: %v", err)
-    }
-
-    // CNI Runtime 설정
+    // PID 기반 NetNS 경로 설정
     runtimeConf := &libcni.RuntimeConf{
         ContainerID: containerID,
-        NetNS:       fmt.Sprintf("/proc/%s/ns/net", containerID),
+        NetNS:       fmt.Sprintf("/proc/%s/ns/net", containerID),  // 실제 PID 기반 네임스페이스
         IfName:      "eth0",
     }
 
@@ -75,4 +75,3 @@ func SetupCNINetwork(containerID string) (string, error) {
     ipAddr := result040.IPs[0].Address.String()
     return ipAddr, nil
 }
-

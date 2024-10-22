@@ -1,19 +1,12 @@
 package container
 
 import (
-    "encoding/json"
     "fmt"
-    "io/ioutil"
     "os"
     "os/exec"
     "path/filepath"
     "syscall"
-    "time"
-    "github.com/google/uuid"
     "carte/pkg/subsystem"
-    "carte/pkg/utils"
-    // "golang.org/x/sys/unix"
-    
 )
 
 type ContainerInfo struct {
@@ -28,16 +21,45 @@ type ContainerInfo struct {
     ExitCode  int               `json:"exit_code,omitempty"`
 }
 
+// MountNamespaceContainer는 마운트 네임스페이스를 사용하여 컨테이너 파일 시스템을 분리합니다.
+func MountNamespaceContainer(rootFsPath string) error {
+    // 마운트 네임스페이스에서 파일 시스템을 분리
+    if err := syscall.Mount("", "/", "", syscall.MS_PRIVATE|syscall.MS_REC, ""); err != nil {
+        return fmt.Errorf("파일 시스템 분리 실패: %v", err)
+    }
+
+    // rootfs를 새로운 루트로 마운트 (read/write로 마운트)
+    if err := syscall.Mount(rootFsPath, rootFsPath, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+        return fmt.Errorf("루트 파일 시스템 마운트 실패: %v", err)
+    }
+
+    // rootfs 내부에 proc 디렉토리가 없으면 생성
+    procPath := filepath.Join(rootFsPath, "proc")
+    if _, err := os.Stat(procPath); os.IsNotExist(err) {
+        if err := os.Mkdir(procPath, 0755); err != nil {
+            return fmt.Errorf("proc 디렉토리 생성 실패: %v", err)
+        }
+    }
+
+    // rootfs 내부에 proc 파일 시스템을 마운트
+    if err := syscall.Mount("proc", procPath, "proc", 0, ""); err != nil {
+        return fmt.Errorf("proc 마운트 실패: %v", err)
+    }
+
+    return nil
+}
+
+
 func RunContainer(name, imageID, cpuLimit, memoryLimit string) {
     imagesDir := "/var/run/carte/images/"
-    imagePath := filepath.Join(imagesDir, imageID)
+    rootFsPath := filepath.Join(imagesDir, imageID, "rootfs")  // rootfs 디렉토리 확인
 
-    if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+    if _, err := os.Stat(rootFsPath); os.IsNotExist(err) {
         fmt.Printf("이미지 %s를 찾을 수 없습니다.\n", imageID)
         return
     }
 
-    // 쉘 명령 실행
+    // 새로운 네임스페이스에서 프로세스를 실행
     cmd := exec.Command("/bin/sh")
     cmd.SysProcAttr = &syscall.SysProcAttr{
         Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWNET | syscall.CLONE_NEWIPC,
@@ -48,52 +70,27 @@ func RunContainer(name, imageID, cpuLimit, memoryLimit string) {
     cmd.Stdout = os.Stdout
     cmd.Stderr = os.Stderr
 
-    // 새로운 루트 내부에 put_old 디렉토리 생성
-    putOld := filepath.Join(imagePath, "put_old")
-    if err := os.MkdirAll(putOld, 0700); err != nil {
-        fmt.Println("put_old 디렉토리 생성 실패:", err)
+    // 마운트 네임스페이스를 설정
+    if err := MountNamespaceContainer(rootFsPath); err != nil {
+        fmt.Printf("마운트 네임스페이스 설정 실패: %v\n", err)
         return
     }
 
-    // 새로운 루트를 바인드 마운트
-    if err := syscall.Mount(imagePath, imagePath, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
-        fmt.Println("파일 시스템 바인드 마운트 실패:", err)
-        return
-    }
-
-    // pivot_root 실행
-    if err := syscall.PivotRoot(imagePath, putOld); err != nil {
-        fmt.Println("pivot_root 실패:", err)
-        return
-    }
-
-    // 루트 디렉토리 변경
-    if err := syscall.Chdir("/"); err != nil {
-        fmt.Println("chdir 실패:", err)
-        return
-    }
-
-    // put_old 마운트 해제
-    if err := syscall.Unmount("/put_old", syscall.MNT_DETACH); err != nil {
-        fmt.Println("put_old 마운트 해제 실패:", err)
-        return
-    }
-
-    // put_old 디렉토리 삭제
-    if err := os.Remove("/put_old"); err != nil {
-        fmt.Println("put_old 삭제 실패:", err)
+    // chroot 사용 대신에 파일 시스템 마운트를 설정한 후 진행
+    if err := syscall.Chdir(rootFsPath); err != nil {
+        fmt.Printf("루트 파일 시스템 변경 실패: %v\n", err)
         return
     }
 
     // 컨테이너 실행
     if err := cmd.Start(); err != nil {
-        fmt.Println("컨테이너 실행 실패:", err)
+        fmt.Printf("컨테이너 실행 실패: %v\n", err)
         return
     }
 
     fmt.Printf("컨테이너가 PID %d에서 실행 중입니다.\n", cmd.Process.Pid)
 
-    containerID := fmt.Sprintf("%d", cmd.Process.Pid)
+    containerID := fmt.Sprintf("%d", cmd.Process.Pid)  // PID를 containerID로 사용
 
     // CNI 네트워크 설정
     ipAddr, err := subsystem.SetupCNINetwork(containerID)
@@ -115,36 +112,3 @@ func RunContainer(name, imageID, cpuLimit, memoryLimit string) {
         fmt.Println("컨테이너 실행 성공")
     }
 }
-
-// 컨테이너 정보 저장 함수
-func saveContainerInfo(pid int, name, image string, networkInfo, resourcesInfo map[string]string) {
-    containersDir := "/var/run/carte/containers/"
-    utils.CreateDirIfNotExists(containersDir)
-
-    if name == "" {
-        name = fmt.Sprintf("container-%d", pid)
-    }
-
-    containerInfo := ContainerInfo{
-        ID:        uuid.New().String(),
-        Name:      name,
-        Image:     image,
-        PID:       pid,
-        Status:    "running",
-        Network:   networkInfo,
-        Resources: resourcesInfo,
-        CreatedAt: time.Now().Format(time.RFC3339),
-    }
-
-    containerData, err := json.MarshalIndent(containerInfo, "", "    ")
-    if err != nil {
-        fmt.Println("컨테이너 정보 저장 실패:", err)
-        return
-    }
-
-    containerFile := containersDir + containerInfo.ID + ".json"
-    if err := ioutil.WriteFile(containerFile, containerData, 0644); err != nil {
-        fmt.Println("컨테이너 정보 파일 저장 실패:", err)
-    }
-}
-

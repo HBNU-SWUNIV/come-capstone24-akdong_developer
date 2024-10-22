@@ -10,14 +10,14 @@ import (
     "os/exec"
     "path/filepath"
     "strings"
-    "archive/tar"
-    "compress/gzip"
+    //"archive/tar"
+    //"compress/gzip"
 )
 
 // BuildContainer는 주어진 Cartefile과 이미지 이름을 기반으로 새로운 이미지를 빌드하는 함수입니다.
 func BuildContainer(cartefilePath, imageName string) error {
     fmt.Println("Cartefile을 읽고 있습니다...")
-    
+
     // 1. Cartefile 읽기
     file, err := os.Open(cartefilePath)
     if err != nil {
@@ -59,15 +59,21 @@ func BuildContainer(cartefilePath, imageName string) error {
     }
     fmt.Println("베이스 이미지가 준비되었습니다:", baseImage)
 
-    // 4. 명령어 처리 (RUN, COPY, CMD)
-    layerDir := filepath.Join(tempDir, "layers")
-    os.MkdirAll(layerDir, 0755) // 레이어 저장 디렉토리 생성
+    // 4. 베이스 이미지 복사
+    imagePath := filepath.Join("/var/run/carte/images", imageName)
+    rootFsPath := filepath.Join(imagePath, "rootfs")
+    os.MkdirAll(rootFsPath, 0755) // rootfs 디렉토리 생성
 
-    rootFsPath := filepath.Join("/var/run/carte/images", baseImage) // chroot로 사용할 베이스 이미지의 루트 파일 시스템
+    fmt.Println("베이스 이미지 복사 중:", baseImagePath, "->", rootFsPath)
+    if err := copyDirectory(baseImagePath, rootFsPath); err != nil {
+        return fmt.Errorf("베이스 이미지 복사 중 오류 발생: %v", err)
+    }
+
+    // 5. 명령어 처리 (RUN, COPY, CMD)
     for i, cmd := range commands {
         if strings.HasPrefix(cmd, "RUN") {
             runCommand := strings.TrimSpace(strings.TrimPrefix(cmd, "RUN"))
-            if err := handleLayer(runCommand, rootFsPath, layerDir, i); err != nil {
+            if err := handleLayer(runCommand, rootFsPath, "", imageName, i); err != nil {
                 return fmt.Errorf("RUN 명령어 실행 중 오류 발생: %v", err)
             }
         } else if strings.HasPrefix(cmd, "COPY") {
@@ -76,7 +82,7 @@ func BuildContainer(cartefilePath, imageName string) error {
                 return fmt.Errorf("COPY 명령어 형식이 잘못되었습니다: %s", cmd)
             }
             src := copyParts[0]
-            dest := filepath.Join(layerDir, copyParts[1])
+            dest := filepath.Join(rootFsPath, copyParts[1]) // rootfs로 직접 복사
             if err := copyFile(src, dest); err != nil {
                 return fmt.Errorf("COPY 중 오류 발생: %v", err)
             }
@@ -88,24 +94,14 @@ func BuildContainer(cartefilePath, imageName string) error {
         }
     }
 
-    // 5. 최종 이미지 생성 (레이어를 tar 아카이브로 압축)
-    fmt.Println("이미지 tar 파일을 생성 중입니다...") // 추가된 로그
-    imagePath := filepath.Join("/var/run/carte/images", imageName)
-    if err := os.MkdirAll(imagePath, 0755); err != nil {
-        return fmt.Errorf("이미지 디렉토리 생성 중 오류 발생: %v", err)
-    }
-
-    imageTarPath := filepath.Join(imagePath, "image.tar")
-    if err := createTarFromLayers(layerDir, imageTarPath); err != nil {
-        return fmt.Errorf("이미지 파일 생성 중 오류 발생: %v", err)
-    }
-
     fmt.Println("이미지 빌드 완료:", imagePath)
     return nil
 }
 
+
+
 // handleLayer는 명령어 실행 전 캐시를 확인하고, 캐시가 없으면 새로운 레이어를 생성합니다.
-func handleLayer(command, rootFsPath, layerDir string, layerIndex int) error {
+func handleLayer(command, rootFsPath, layerDir, imageName string, layerIndex int) error {
     // 1. 명령어 해시를 생성하여 캐시가 존재하는지 확인
     layerHash := hashCommand(command)
     cachedLayerPath := filepath.Join("/var/run/carte/cache", layerHash)
@@ -117,6 +113,8 @@ func handleLayer(command, rootFsPath, layerDir string, layerIndex int) error {
 
     // 2. 캐시된 레이어가 없으면 새로운 레이어 생성
     fmt.Println("새로운 레이어 생성:", command)
+    
+    // 여기서 layerDir 제거
     if err := runInChroot(command, rootFsPath, layerIndex); err != nil {
         return fmt.Errorf("명령어 실행 중 오류: %v", err)
     }
@@ -127,14 +125,51 @@ func handleLayer(command, rootFsPath, layerDir string, layerIndex int) error {
         return fmt.Errorf("레이어 저장 중 오류 발생: %v", err)
     }
 
-    // 4. 생성된 레이어를 캐시에 저장
-    os.MkdirAll(cachedLayerPath, 0755)
-    if err := copyFile(newLayerPath, cachedLayerPath); err != nil {
-        return fmt.Errorf("캐시 저장 중 오류 발생: %v", err)
-    }
-
     return nil
 }
+
+
+// 레이어 병합 함수
+func mergeLayers(layerDir, imagePath string) error {
+    fmt.Println("레이어 병합 중:", layerDir)
+
+    // 이미지의 최종 루트 파일 시스템을 생성
+    finalFsPath := filepath.Join(imagePath, "rootfs")
+    os.MkdirAll(finalFsPath, 0755)
+
+    // 레이어 디렉토리 내 모든 레이어 병합
+    err := filepath.Walk(layerDir, func(file string, fi os.FileInfo, err error) error {
+        if err != nil {
+            return err
+        }
+
+        if fi.IsDir() {
+            return nil
+        }
+
+        relPath, err := filepath.Rel(layerDir, file)
+        if err != nil {
+            return fmt.Errorf("파일 경로 변환 중 오류 발생: %v", err)
+        }
+
+        destPath := filepath.Join(finalFsPath, relPath)
+        fmt.Printf("병합 중: %s -> %s\n", file, destPath)
+
+        if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+            return fmt.Errorf("상위 디렉토리 생성 중 오류 발생: %v", err)
+        }
+
+        return copyFile(file, destPath)
+    })
+
+    if err != nil {
+        return fmt.Errorf("레이어 병합 중 오류 발생: %v", err)
+    }
+
+    fmt.Println("레이어 병합 완료")
+    return nil
+}
+
 
 // runInChroot는 chroot 환경에서 명령어를 실행합니다.
 func runInChroot(command, rootFsPath string, layerIndex int) error {
@@ -142,11 +177,31 @@ func runInChroot(command, rootFsPath string, layerIndex int) error {
     cmd := exec.Command("chroot", rootFsPath, "sh", "-c", command)
     cmd.Stdout = os.Stdout
     cmd.Stderr = os.Stderr
-    fmt.Println("명령어 실행 시작")  // 추가된 로그
+    fmt.Println("명령어 실행 시작")
     err := cmd.Run()
-    fmt.Println("명령어 실행 완료")  // 추가된 로그
+    fmt.Println("명령어 실행 완료")
     return err
 }
+
+// copyDirectory는 베이스 이미지를 임시 작업 디렉토리로 복사하는 함수입니다.
+func copyDirectory(src, dest string) error {
+    fmt.Printf("exec.Command로 디렉토리 복사: %s -> %s\n", src, dest)
+    
+    // rsync를 사용하여 디렉토리를 복사
+    cmd := exec.Command("rsync", "-a", "--delete", "--verbose", "--exclude", "/proc", "--exclude", "/sys", "--exclude", "/dev", src+"/", dest+"/")
+    
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+
+    err := cmd.Run()
+    if err != nil {
+        return fmt.Errorf("rsync 명령어 실행 중 오류 발생: %v", err)
+    }
+    
+    fmt.Println("rsync를 사용한 디렉토리 복사 완료")
+    return nil
+}
+
 
 
 // copyFile은 src 파일을 dest로 복사합니다.
@@ -163,9 +218,18 @@ func copyFile(src, dest string) error {
     }
     defer destFile.Close()
 
-    _, err = io.Copy(destFile, srcFile)
-    return err
+    if _, err = io.Copy(destFile, srcFile); err != nil {
+        return err
+    }
+
+    srcInfo, err := os.Stat(src)
+    if err != nil {
+        return err
+    }
+    return os.Chmod(dest, srcInfo.Mode())
 }
+
+
 
 // saveLayerDiff는 파일 시스템의 변화를 레이어로 저장합니다.
 func saveLayerDiff(rootFsPath, layerDir string) error {
@@ -185,75 +249,6 @@ func saveLayerDiff(rootFsPath, layerDir string) error {
     }
     
     fmt.Println("rsync 명령어 실행 완료")
-    return nil
-}
-
-
-
-
-// createTarFromLayers는 레이어 디렉토리를 tar 아카이브로 저장합니다.
-func createTarFromLayers(layerDir, tarPath string) error {
-    fmt.Println("레이어를 tar로 압축 중: ", layerDir)
-    
-    tarFile, err := os.Create(tarPath)
-    if err != nil {
-        return fmt.Errorf("tar 파일 생성 중 오류 발생: %v", err)
-    }
-    defer tarFile.Close()
-
-    // gzip을 통해 tar 파일 압축
-    gzipWriter := gzip.NewWriter(tarFile)
-    defer gzipWriter.Close()
-
-    tarWriter := tar.NewWriter(gzipWriter)
-    defer tarWriter.Close()
-
-    // 레이어 디렉토리를 tar로 압축
-    err = filepath.Walk(layerDir, func(file string, fi os.FileInfo, err error) error {
-        if err != nil {
-            return err
-        }
-
-        if !fi.Mode().IsRegular() {
-            return nil
-        }
-
-        relPath, err := filepath.Rel(layerDir, file)
-        if err != nil {
-            return err
-        }
-
-        fmt.Printf("파일 압축 중: %s\n", relPath)  // 파일 압축 중 로그 출력
-
-        header, err := tar.FileInfoHeader(fi, relPath)
-        if err != nil {
-            return err
-        }
-
-        header.Name = relPath
-
-        if err := tarWriter.WriteHeader(header); err != nil {
-            return err
-        }
-
-        fileHandle, err := os.Open(file)
-        if err != nil {
-            return err
-        }
-        defer fileHandle.Close()
-
-        if _, err := io.Copy(tarWriter, fileHandle); err != nil {
-            return err
-        }
-
-        return nil
-    })
-
-    if err != nil {
-        return fmt.Errorf("tar 파일 생성 중 오류 발생: %v", err)
-    }
-
-    fmt.Println("tar 아카이브 생성 완료: ", tarPath)
     return nil
 }
 

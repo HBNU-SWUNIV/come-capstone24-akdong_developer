@@ -8,8 +8,8 @@ import (
     "os"
     "path/filepath"
     "syscall"
-    "bufio"
-    "strings"
+    // "bufio"
+    //"strings"
     "golang.org/x/sys/unix"
 	
 	"github.com/spf13/cobra"
@@ -113,10 +113,29 @@ func extractTar(tarFile, destDir string) error {
     return nil
 }
 
+func setupSystemDirs() error {
+    // /proc 마운트
+    if err := syscall.Mount("proc", "/proc", "proc", 0, ""); err != nil {
+        return fmt.Errorf("failed to mount /proc: %v", err)
+    }
+
+    // /sys 마운트
+    if err := syscall.Mount("sysfs", "/sys", "sysfs", 0, ""); err != nil {
+        return fmt.Errorf("failed to mount /sys: %v", err)
+    }
+
+    // /dev 마운트
+    if err := syscall.Mount("tmpfs", "/dev", "tmpfs", syscall.MS_NOSUID|syscall.MS_STRICTATIME, "mode=755"); err != nil {
+        return fmt.Errorf("failed to mount /dev: %v", err)
+    }
+
+    return nil
+}
+
+
 // 루트 파일 시스템 변경 함수
 func prepareContainer(newRoot string) error {
     // 새로운 루트로 변경 (chroot)
-
     fmt.Printf("checking path: %s\n", newRoot)
     if _, err := os.Stat(newRoot); err != nil {
         return fmt.Errorf("command not found or inaccessible: %v", err) // 오류 메시지 수정 및 오류 반환
@@ -131,7 +150,7 @@ func prepareContainer(newRoot string) error {
         return fmt.Errorf("failed to change directory to new root: %v", err)
     }
 
-    // 시스템 디렉토리 설정 (proc, sys, dev 마운트)
+    // 시스템 디렉토리 설정
     if err := setupSystemDirs(); err != nil {
         return err
     }
@@ -145,46 +164,7 @@ func prepareContainer(newRoot string) error {
 }
 
 
-func setupSystemDirs() error {
-    // /proc 마운트 확인 후 마운트
-    if !isMounted("/proc") {
-        if err := syscall.Mount("proc", "/proc", "proc", 0, ""); err != nil {
-            return fmt.Errorf("failed to mount /proc: %v", err)
-        }
-    }
 
-    // /sys 마운트 확인 후 마운트
-    if !isMounted("/sys") {
-        if err := syscall.Mount("sysfs", "/sys", "sysfs", 0, ""); err != nil {
-            return fmt.Errorf("failed to mount /sys: %v", err)
-        }
-    }
-
-    // /dev 마운트 확인 후 마운트
-    if !isMounted("/dev") {
-        if err := syscall.Mount("tmpfs", "/dev", "tmpfs", syscall.MS_NOSUID|syscall.MS_STRICTATIME, "mode=755"); err != nil {
-            return fmt.Errorf("failed to mount /dev: %v", err)
-        }
-    }
-    return nil
-}
-
-// 마운트 여부 확인 함수
-func isMounted(target string) bool {
-    file, err := os.Open("/proc/mounts")
-    if err != nil {
-        return false
-    }
-    defer file.Close()
-
-    scanner := bufio.NewScanner(file)
-    for scanner.Scan() {
-        if strings.Contains(scanner.Text(), target) {
-            return true
-        }
-    }
-    return false
-}
 
 func createDevFiles() error {
     // /dev/null 생성
@@ -219,4 +199,3 @@ func createDevFiles() error {
 
     return nil
 }
-

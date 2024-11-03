@@ -1,112 +1,55 @@
 package cmd
 
 import (
-    "archive/tar"
     "fmt"
-    "io"
-    "log"
     "os"
-    "path/filepath"
-    //"syscall"
-    //"bufio"
-    //"strings"
-    //"golang.org/x/sys/unix"
+    "os/exec"
     "github.com/spf13/cobra"
 )
 
-var containerName string
-
-var createCmd = &cobra.Command{
-    Use:   "create [imageName]",
-    Short: "Container create",
+// image_create 명령 정의
+var imageCreateCmd = &cobra.Command{
+    Use:   "create [scriptFile]",
+    Short: "Create an image using the specified script file",
     Args:  cobra.ExactArgs(1),
     RunE: func(cmd *cobra.Command, args []string) error {
-        imageName := args[0]
-        if containerName == "" {
-            containerName = imageName
+        scriptFile := args[0]
+
+        // 스크립트 파일 실행
+        if err := executeScript(scriptFile); err != nil {
+            return fmt.Errorf("failed to execute script: %v", err)
         }
-        return CtCreate(imageName, containerName)
+
+        fmt.Printf("Image created successfully using script %s\n", scriptFile)
+        return nil
     },
 }
 
 func init() {
-    createCmd.Flags().StringVarP(&containerName, "output", "o", "", "Container name (optional)")
-    rootCmd.AddCommand(createCmd)
+    rootCmd.AddCommand(imageCreateCmd)
 }
 
-func CtCreate(imageName, containerName string) error {
-    imageTarPath := "/CarteTest/image/" + imageName + ".tar"
-    containerPath := "/CarteTest/container/" + containerName
-
-    fmt.Printf("Start Create Container %v\n", containerName)
-
-    if _, err := os.Stat(imageTarPath); err == nil {
-        fmt.Println("Found tar file...")
-        if _, err := os.Stat(containerPath); os.IsNotExist(err) {
-            if err := os.MkdirAll(containerPath, 0755); err != nil {
-                return fmt.Errorf("failed to create container directory: %v", err)
-            }
-            if err := extractTar(imageTarPath, containerPath); err != nil {
-                return fmt.Errorf("failed to extract tar file: %v", err)
-            }
-            fmt.Println("Container created successfully")
-        } else {
-            fmt.Println("Container already exists")
-        }
-    } else {
-        return fmt.Errorf("image file not found: %s", imageTarPath)
+// 스크립트 실행 함수
+func executeScript(scriptFile string) error {
+    // 스크립트 파일 존재 여부 확인
+    if _, err := os.Stat(scriptFile); os.IsNotExist(err) {
+        return fmt.Errorf("script file %s does not exist", scriptFile)
     }
 
-    return nil
-}
-
-func extractTar(tarFile, destDir string) error {
-    file, err := os.Open(tarFile)
-    if err != nil {
-        return fmt.Errorf("failed to open tar file: %v", err)
+    // 실행 권한이 있는지 확인
+    if err := os.Chmod(scriptFile, 0755); err != nil {
+        return fmt.Errorf("failed to set execute permissions on script file: %v", err)
     }
-    defer file.Close()
 
-    tarReader := tar.NewReader(file)
-    for {
-        header, err := tarReader.Next()
-        if err == io.EOF {
-            break
-        }
-        if err != nil {
-            return fmt.Errorf("failed to read tar file: %v", err)
-        }
+    // 스크립트 실행
+    cmd := exec.Command("/bin/bash", scriptFile)
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
 
-        targetPath := filepath.Join(destDir, header.Name)
-
-        // 특수 파일을 무시하고 건너뜁니다.
-        if header.Typeflag == tar.TypeChar || header.Typeflag == tar.TypeBlock || header.Typeflag == tar.TypeSymlink {
-            log.Printf("Skipping special file: %s", header.Name)
-            continue
-        }
-
-        switch header.Typeflag {
-        case tar.TypeDir:
-            if err := os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil {
-                return fmt.Errorf("failed to create directory: %v", err)
-            }
-        case tar.TypeReg:
-            outFile, err := os.Create(targetPath)
-            if err != nil {
-                return fmt.Errorf("failed to create file: %v", err)
-            }
-            if _, err := io.Copy(outFile, tarReader); err != nil {
-                outFile.Close()
-                return fmt.Errorf("failed to write file: %v", err)
-            }
-            outFile.Close()
-
-            if err := os.Chmod(targetPath, os.FileMode(header.Mode)); err != nil {
-                return fmt.Errorf("failed to set file permissions: %v", err)
-            }
-        default:
-            log.Printf("Unknown type: %v in %s", header.Typeflag, header.Name)
-        }
+    // 스크립트 실행 오류 처리
+    if err := cmd.Run(); err != nil {
+        return fmt.Errorf("error running script: %v", err)
     }
+
     return nil
 }

@@ -4,6 +4,7 @@ import (
     "fmt"
     "os"
     "os/exec"
+    "path/filepath"
     "strings"
 
     "github.com/spf13/cobra"
@@ -23,81 +24,67 @@ func init() {
     rootCmd.AddCommand(stopCmd)
 }
 
-// 컨테이너 중지 함수 ///////////////////////////////////// bin/busybox말고 다른 이미지도 사용가능하도록 ///////
 func stopContainer(containerName string) error {
-    // 컨테이너와 관련된 PID 찾기
-    // 마운트 해제 (umount)
-    if err := unmountContainer(containerName); err != nil {
-        return fmt.Errorf("failed to unmount container %s: %v", containerName, err)
-    }
+    containerPath := "/CarteTest/container/" + containerName
+    pidFilePath := filepath.Join(containerPath, "pid")
 
-    fmt.Printf("Container %s unmounted successfully\n", containerName)
-    
-    
-    pid, err := getContainerPID("/bin/busybox")
+    // PID 파일에서 컨테이너의 PID 읽기
+    pid, err := os.ReadFile(pidFilePath)
     if err != nil {
-        return fmt.Errorf("failed to get PID for container %s: %v", containerName, err)
+        return fmt.Errorf("failed to read PID file for container %s: %v", containerName, err)
+    }
+    pidStr := strings.TrimSpace(string(pid))
+    fmt.Printf("Stopping container %s with PID %s\n", containerName, pidStr)
+
+    // 마운트 해제
+    if err := unmountContainer(containerPath); err != nil {
+        fmt.Printf("Warning: failed to unmount container %s: %v\n", containerName, err)
+    } else {
+        fmt.Printf("Unmounted all mounts for container %s\n", containerName)
     }
 
-    // PID로 프로세스 종료
-    if err := exec.Command("kill", "-9", pid).Run(); err != nil {
-        return fmt.Errorf("failed to stop container %s: %v", containerName, err)
+    // veth 인터페이스 삭제
+    vethHost := fmt.Sprintf("vh_%s", pidStr)
+    if err := deleteVethInterface(vethHost); err != nil {
+        fmt.Printf("Warning: failed to delete veth interface %s: %v\n", vethHost, err)
+    } else {
+        fmt.Printf("Deleted veth interface %s\n", vethHost)
     }
-
-    fmt.Printf("Container %s stopped successfully\n", containerName)
 
     // PID 파일 삭제
-    if err := removeContainerPID(containerName); err != nil {
-        return fmt.Errorf("failed to remove PID file for container %s: %v", containerName, err)
+    if err := os.Remove(pidFilePath); err != nil {
+        fmt.Printf("Warning: failed to remove PID file for container %s: %v\n", containerName, err)
+    } else {
+        fmt.Printf("Removed PID file for container %s\n", containerName)
     }
 
-    fmt.Printf("Remove PID")
-
-    
     return nil
 }
 
-// /bin/busybox와 연관된 PID 찾기
-func getContainerPID(processName string) (string, error) {
-    // 'pgrep' 명령을 사용하여 프로세스 이름으로 PID 찾기
-    cmd := exec.Command("pgrep", "-f", processName)
-    output, err := cmd.Output()
-    if err != nil {
-        return "", fmt.Errorf("failed to find process: %v", err)
+// veth 인터페이스 삭제 함수
+func deleteVethInterface(vethHost string) error {
+    if err := exec.Command("ip", "link", "del", vethHost).Run(); err != nil {
+        return fmt.Errorf("failed to delete veth interface %s: %v", vethHost, err)
     }
-
-    // 출력된 PID 리스트 중 첫 번째 PID 반환
-    pid := strings.TrimSpace(string(output))
-    if pid == "" {
-        return "", fmt.Errorf("no process found for %s", processName)
-    }
-
-    return pid, nil
+    return nil
 }
 
-// 컨테이너 마운트 해제 함수
-func unmountContainer(containerName string) error {
-    // /proc, /sys, /dev 등을 umount 처리
-    mountPoints := []string{"/CarteTest/container/" + containerName + "/proc", 
-                            "/CarteTest/container/" + containerName + "/sys", 
-                            "/CarteTest/container/" + containerName + "/dev"}
+// 마운트 해제 함수
+func unmountContainer(containerPath string) error {
+    // 컨테이너의 루트 및 시스템 디렉토리 포함
+    mountPoints := []string{
+        filepath.Join(containerPath, "proc"),
+        filepath.Join(containerPath, "sys"),
+        filepath.Join(containerPath, "dev"),
+        containerPath, // 루트 컨테이너 경로
+    }
 
     for _, mountPoint := range mountPoints {
-        if err := exec.Command("umount", mountPoint).Run(); err != nil {
-            return fmt.Errorf("failed to unmount %s: %v", mountPoint, err)
+        if err := exec.Command("umount", "-l", mountPoint).Run(); err != nil {
+            fmt.Printf("Warning: failed to unmount %s: %v\n", mountPoint, err)
+            continue // 오류가 발생해도 다음 마운트 포인트로 넘어감
         }
-    }
-
-    return nil
-}
-
-// 컨테이너의 PID 파일을 삭제하는 함수
-func removeContainerPID(containerName string) error {
-    pidFilePath := "/CarteTest/container/" + containerName + "/pid"
-    
-    // PID 파일이 존재하는지 확인 후 삭제
-    if err := os.Remove(pidFilePath); err != nil {
-        return fmt.Errorf("failed to remove PID file: %v", err)
+        fmt.Printf("Unmounted %s\n", mountPoint)
     }
 
     return nil

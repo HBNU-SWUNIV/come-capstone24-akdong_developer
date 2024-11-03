@@ -7,6 +7,7 @@ import (
     "os/exec"
     "path/filepath"
     "syscall"
+    "time"
     "golang.org/x/sys/unix"
     "github.com/spf13/cobra"
 )
@@ -45,6 +46,7 @@ func startContainer(containerPath, containerName string) error {
     }
 
     // 네트워크 네임스페이스 설정을 cmd.Start() 이후로 이동
+    time.Sleep(1000 * time.Millisecond) // 네트워크 네임스페이스 안정화를 위해 지연 추가
     if err := setupNetworkNamespace(cmd); err != nil {
         return fmt.Errorf("failed to setup network namespace: %v", err)
     }
@@ -60,7 +62,7 @@ func startContainer(containerPath, containerName string) error {
     }
 
     return nil
-}   
+}
 
 func runInNewNamespace(containerPath, path string, args []string, containerName string) (*exec.Cmd, error) {
     fmt.Println("[DEBUG] Starting runInNewNamespace function")
@@ -145,21 +147,32 @@ func runInNewNamespace(containerPath, path string, args []string, containerName 
 }
 
 // 컨테이너는 들어가지지만 네트워크 안됨
+// 심볼릭 링크 생성이 안됨(veth[ ls -l /var/run/netns/ ])
 func setupNetworkNamespace(cmd *exec.Cmd) error {
     pid := cmd.Process.Pid
     netnsName := fmt.Sprintf("netns_%d", pid)
-    vethHost := fmt.Sprintf("veth_host_%d", pid)
-    vethContainer := fmt.Sprintf("veth_cont_%d", pid)
+    vethHost := fmt.Sprintf("vh_%d", pid)       // 이름을 짧게 수정
+    vethContainer := fmt.Sprintf("vc_%d", pid)  // 이름을 짧게 수정
 
-    // 기존 네임스페이스와 veth 인터페이스 제거
-    exec.Command("ip", "netns", "del", netnsName).Run()
-    exec.Command("ip", "link", "del", vethHost).Run()
-
-    // 네임스페이스 생성
-    if output, err := exec.Command("ip", "netns", "add", netnsName).CombinedOutput(); err != nil {
-        return fmt.Errorf("[ERROR] Failed to add netns: %v\nOutput: %s", err, output)
+    // /run/netns 디렉토리가 존재하는지 확인하고, 없으면 생성
+    netnsDir := "/run/netns"
+    if _, err := os.Stat(netnsDir); os.IsNotExist(err) {
+        if err := os.MkdirAll(netnsDir, 0755); err != nil {
+            return fmt.Errorf("failed to create netns directory: %v", err)
+        }
     }
-    fmt.Println("[DEBUG] Network namespace created")
+
+    netnsPath := fmt.Sprintf("/proc/%d/ns/net", pid)
+    netnsLink := filepath.Join(netnsDir, netnsName)
+
+    // 기존 링크 삭제 후 새로 생성
+    if err := os.Remove(netnsLink); err != nil && !os.IsNotExist(err) {
+        return fmt.Errorf("failed to remove existing netns symlink: %v", err)
+    }
+    if err := os.Symlink(netnsPath, netnsLink); err != nil {
+        return fmt.Errorf("failed to create netns symlink: %v", err)
+    }
+    fmt.Println("[DEBUG] Symbolic link created for netns")
 
     // veth 페어 생성
     if output, err := exec.Command("ip", "link", "add", vethHost, "type", "veth", "peer", "name", vethContainer).CombinedOutput(); err != nil {
@@ -167,11 +180,16 @@ func setupNetworkNamespace(cmd *exec.Cmd) error {
     }
     fmt.Println("[DEBUG] veth pair created successfully")
 
+
+    time.Sleep(100 * time.Millisecond)
+
     // vethContainer를 네임스페이스로 이동
     if output, err := exec.Command("ip", "link", "set", vethContainer, "netns", netnsName).CombinedOutput(); err != nil {
         return fmt.Errorf("[ERROR] Failed to move vethContainer to netns: %v\nOutput: %s", err, output)
     }
     fmt.Println("[DEBUG] vethContainer moved to network namespace")
+
+    time.Sleep(100 * time.Millisecond)
 
     // 호스트 쪽 vethHost에 IP 주소 할당 및 활성화
     if output, err := exec.Command("ip", "addr", "add", "192.168.1.1/24", "dev", vethHost).CombinedOutput(); err != nil {
@@ -182,6 +200,8 @@ func setupNetworkNamespace(cmd *exec.Cmd) error {
     }
     fmt.Println("[DEBUG] vethHost IP assigned and interface brought up")
 
+    time.Sleep(100 * time.Millisecond)
+
     // 네임스페이스 내에서 vethContainer에 IP 주소 할당 및 인터페이스 활성화
     if output, err := exec.Command("ip", "netns", "exec", netnsName, "ip", "addr", "add", "192.168.1.2/24", "dev", vethContainer).CombinedOutput(); err != nil {
         return fmt.Errorf("[ERROR] Failed to assign IP to vethContainer: %v\nOutput: %s", err, output)
@@ -191,11 +211,15 @@ func setupNetworkNamespace(cmd *exec.Cmd) error {
     }
     fmt.Println("[DEBUG] vethContainer IP assigned and interface brought up")
 
+    time.Sleep(100 * time.Millisecond)
+
     // 네임스페이스 내 루프백 인터페이스 활성화
     if output, err := exec.Command("ip", "netns", "exec", netnsName, "ip", "link", "set", "lo", "up").CombinedOutput(); err != nil {
         return fmt.Errorf("[ERROR] Failed to bring up loopback in netns: %v\nOutput: %s", err, output)
     }
     fmt.Println("[DEBUG] Loopback interface brought up in network namespace")
+
+    time.Sleep(100 * time.Millisecond)
 
     // 네임스페이스 내 기본 게이트웨이 설정
     if output, err := exec.Command("ip", "netns", "exec", netnsName, "ip", "route", "add", "default", "via", "192.168.1.1").CombinedOutput(); err != nil {
@@ -205,6 +229,7 @@ func setupNetworkNamespace(cmd *exec.Cmd) error {
 
     return nil
 }
+
 
 func recordContainerPID(containerName string, pid int) error {
     pidFilePath := fmt.Sprintf("pid")

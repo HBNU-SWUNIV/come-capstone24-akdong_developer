@@ -17,7 +17,7 @@
   - ### System Requirements
     #### 시스템 구성도
 
-    ![alt text](image.png)
+    ![alt text](./image/image.png)
     
     - Control Plane
       - 작업 지시 및 상태를 확인하는 컨테이너 간 통신 작업 수행
@@ -26,7 +26,7 @@
 
     #### Carte Engine
 
-    ![alt text](image-1.png)
+    ![alt text](./image/image-1.png)
 
     - Namespace 설정을 통한 프로세스 격리
       - 컨테이너가 독립적으로 동작할 수 있는 격리된 실행 환경 제공
@@ -39,16 +39,16 @@
 
     #### Carte 명령어
 
-    ![alt text](image-2.png)
+    ![alt text](./image/image-2.png)
 
       - Container Life Cycle을 기준으로 생성하였으며 기존 기술보다 명령어를 간소화시켜 사용자 입장에서 유용한 사용을 하도록 구성함
 
     
 ## Case Study
   - #### 기존 도구와의 비교
-    ![alt text](image-3.png)
+    ![alt text](./image/image-3.png)
 
-    ![alt text](image-4.png)
+    ![alt text](./image/image-4.png)
     
 
   
@@ -56,9 +56,9 @@
 
   - 완성품
 
-    ![alt text](image-5.png)
+    ![alt text](./image/image-5.png)
 
-    ![alt text](image-6.png)
+    ![alt text](./image/image-6.png)
 
   - 기대효과
 
